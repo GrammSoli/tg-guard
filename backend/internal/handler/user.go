@@ -45,6 +45,18 @@ func (h *UserHandler) WithNotifier(n notifier.Notifier) *UserHandler {
 // notification_time field so we never push junk into worker parsing.
 var notificationTimePattern = regexp.MustCompile(`^([01]\d|2[0-3]):([0-5]\d)$`)
 
+// exportCaption returns the Telegram document caption for the data export,
+// localized to the user's stored locale. Inlined here because the backend
+// has no i18n bundle and the surface is tiny (one string, two locales).
+func exportCaption(locale string) string {
+	switch locale {
+	case "ru":
+		return "📦 Ваш экспорт данных SubGuard. Сохраните файл — внутри весь ваш профиль, подписки и комнаты."
+	default:
+		return "📦 Your SubGuard data export. Keep this file safe — it contains your full profile, subscriptions and rooms."
+	}
+}
+
 // GetMe returns the authenticated user's profile.
 // GET /api/v1/me
 func (h *UserHandler) GetMe(c fiber.Ctx) error {
@@ -225,7 +237,7 @@ func (h *UserHandler) ExportMe(c fiber.Ctx) error {
 		user.TelegramID,
 		time.Now().UTC().Format("2006-01-02"),
 	)
-	caption := "📦 Your SubGuard data export. Keep this file safe — it contains all of your profile, subscriptions and rooms."
+	caption := exportCaption(user.Locale)
 
 	if err := h.notifier.SendDocument(c.Context(), user.TelegramID, filename, content, caption); err != nil {
 		log.Printf("[user.ExportMe] user=%d send document error: %v", user.ID, err)
