@@ -198,7 +198,7 @@ func main() {
 	}))
 
 	// User
-	userH := handler.NewUserHandler(cfg, db)
+	userH := handler.NewUserHandler(cfg, db).WithNotifier(n)
 	auth.Get("/me", userH.GetMe)
 	auth.Patch("/me", userH.UpdateMe)
 	auth.Get("/me/export", userH.ExportMe)

@@ -59,23 +59,11 @@ export function PrivacySheet({ open, onOpenChange }: Props) {
     hapticImpact("light");
     setDownloading(true);
     try {
-      // We let api() parse the response as JSON. The Content-Disposition
-      // header from the backend is ignored — we re-package the data as a
-      // Blob and trigger the download client-side. Simpler & works inside
-      // Telegram WebView, which can't always handle direct attachment links.
-      const data = await api<Record<string, unknown>>("/me/export");
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      const stamp = new Date().toISOString().slice(0, 10);
-      a.download = `subguard-export-${stamp}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Backend assembles the dump and DMs it as a Telegram document. We
+      // deliberately do NOT create a blob/<a download> here: Telegram
+      // WebView silently swallows those clicks on both iOS and Android,
+      // which previously produced a "success" toast and zero actual file.
+      await api("/me/export");
       toast.success(t("privacy.exportSuccess"));
     } catch (err) {
       const reason =
