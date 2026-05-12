@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -22,11 +24,16 @@ func NewNotificationWorker(db *gorm.DB, n notifier.Notifier) *NotificationWorker
 	return &NotificationWorker{db: db, notifier: n}
 }
 
+// notificationTickInterval is the worker's check cadence. Used as the
+// half-window when deciding whether the user's preferred notification time
+// has just passed.
+const notificationTickInterval = 30 * time.Minute
+
 // Start launches the notification check loop every 30 minutes.
 func (w *NotificationWorker) Start(ctx context.Context) {
 	log.Println("[notification-worker] starting")
 
-	ticker := time.NewTicker(30 * time.Minute)
+	ticker := time.NewTicker(notificationTickInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -47,8 +54,11 @@ func (w *NotificationWorker) check(ctx context.Context) {
 	}
 
 	now := time.Now().UTC()
-	windowStart := now.Add(23 * time.Hour)
-	windowEnd := now.Add(25 * time.Hour)
+	// Widen the candidate window to ~±2h around 24h-out so that the user's
+	// preferred notification_time, evaluated in their own timezone, has a
+	// chance to land inside it regardless of where they live.
+	windowStart := now.Add(22 * time.Hour)
+	windowEnd := now.Add(26 * time.Hour)
 
 	var subs []model.Subscription
 	err := w.db.WithContext(ctx).
@@ -76,9 +86,10 @@ func (w *NotificationWorker) check(ctx context.Context) {
 		if sub.User.TelegramID == 0 {
 			continue
 		}
-		// Respect the user's notification opt-out. The toggle lives on the
-		// User row and is mutated via PATCH /api/v1/me.
 		if !sub.User.NotificationsEnabled {
+			continue
+		}
+		if !shouldSendNow(&sub.User, now) {
 			continue
 		}
 
@@ -94,4 +105,45 @@ func (w *NotificationWorker) check(ctx context.Context) {
 
 		w.db.WithContext(ctx).Model(&sub).Update("notified_at", now)
 	}
+}
+
+// shouldSendNow returns true when `now`, projected into the user's timezone,
+// has just passed their preferred notification time within the worker's
+// tick interval. We send on the FIRST tick that's at-or-after the preferred
+// moment; the existing notified_at dedupe filter prevents double-sends on
+// subsequent ticks the same day.
+func shouldSendNow(u *model.User, now time.Time) bool {
+	loc, err := time.LoadLocation(u.Timezone)
+	if err != nil || loc == nil {
+		loc = time.UTC
+	}
+
+	hh, mm := parseHHMM(u.NotificationTime)
+	nowLocal := now.In(loc)
+	preferred := time.Date(
+		nowLocal.Year(), nowLocal.Month(), nowLocal.Day(),
+		hh, mm, 0, 0, loc,
+	)
+
+	delta := nowLocal.Sub(preferred)
+	// `delta` in [0, tickInterval] means the preferred moment is in the
+	// just-elapsed tick window. Negative = too early; >tick = too late
+	// (will catch on next day or already sent and deduped via notified_at).
+	return delta >= 0 && delta < notificationTickInterval
+}
+
+// parseHHMM parses an "HH:MM" string. Falls back to 10:00 on malformed input
+// — the handler validates input on write, so this is a defence in depth for
+// rows predating the new field.
+func parseHHMM(s string) (int, int) {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return 10, 0
+	}
+	hh, err1 := strconv.Atoi(parts[0])
+	mm, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil || hh < 0 || hh > 23 || mm < 0 || mm > 59 {
+		return 10, 0
+	}
+	return hh, mm
 }

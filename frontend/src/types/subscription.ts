@@ -71,4 +71,9 @@ export interface UserSettings {
   defaultCurrency: string;
   cpaActive: boolean;
   notificationsEnabled: boolean;
+  /** IANA timezone name, e.g. "Europe/Moscow". Hydrated from the user's
+   *  browser via Intl.DateTimeFormat on first sheet open. */
+  timezone: string;
+  /** Preferred notification time of day in "HH:MM" 24h format. */
+  notificationTime: string;
 }
