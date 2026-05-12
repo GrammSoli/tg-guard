@@ -76,6 +76,11 @@ func (w *NotificationWorker) check(ctx context.Context) {
 		if sub.User.TelegramID == 0 {
 			continue
 		}
+		// Respect the user's notification opt-out. The toggle lives on the
+		// User row and is mutated via PATCH /api/v1/me.
+		if !sub.User.NotificationsEnabled {
+			continue
+		}
 
 		text := fmt.Sprintf(
 			"💳 Reminder: your *%s* subscription (%.2f %s) renews tomorrow.",
