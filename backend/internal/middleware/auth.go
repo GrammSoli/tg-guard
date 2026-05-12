@@ -23,9 +23,11 @@ import (
 const contextKeyUser = "user"
 
 // maxInitDataAge bounds how stale an initData payload can be before we reject
-// it. Telegram refreshes initData on every mini-app open, so a short window
-// keeps the replay surface minimal.
-const maxInitDataAge = 5 * time.Minute
+// it. Telegram does NOT refresh initData during a session — it stays valid
+// from the time the user opened the mini-app — so this window must cover a
+// typical session length. 1h matches Telegram's own recommendation and what
+// most production TMAs use.
+const maxInitDataAge = 60 * time.Minute
 
 // TelegramUser is the user object embedded inside initData.
 type TelegramUser struct {

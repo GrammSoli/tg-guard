@@ -35,21 +35,18 @@ export class ApiError extends Error {
   }
 }
 
-// Coalesce concurrent 401-triggered reload attempts. The first failed request
-// sets the flag, schedules a reload, and every subsequent in-flight request
-// throws without scheduling its own reload.
+// Coalesce concurrent 401 toasts. We deliberately do NOT auto-reload: an
+// auto-reload on a persistently-401 backend produces an infinite reload
+// loop inside the Telegram WebView. The user can close + reopen the bot
+// manually; surfacing one clear toast is enough.
 let sessionExpiredHandled = false;
 
 function handleSessionExpired() {
   if (sessionExpiredHandled) return;
   sessionExpiredHandled = true;
-  // Fire-and-forget: avoid awaiting the dynamic import in the hot path.
   import("sonner").then(({ toast }) => {
-    toast.error("Session expired — reopening…");
+    toast.error("Session expired — please reopen the bot");
   }).catch(() => { /* noop */ });
-  if (typeof window !== "undefined") {
-    setTimeout(() => window.location.reload(), 1500);
-  }
 }
 
 /**
