@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"https://pypi.org/pypi/pylingual/json\")",
+      "Bash(python3 -c ' *)",
+      "Read(//Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/pycdc/**)",
+      "Bash(cmake .)",
+      "Bash(make -j4)",
+      "Bash('/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/pycdc/pycdc' '/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/live_monitor_RU.exe_extracted/live_monitor_RU.pyc')",
+      "Bash(chmod +x \"/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/decompile_all.sh\")",
+      "Bash(bash \"/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/decompile_all.sh\")",
+      "Bash(/opt/homebrew/bin/python3.12 -m venv \"/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/venv_pylingual\")",
+      "Bash(\"/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/venv_pylingual/bin/pip\" install --upgrade pip)",
+      "Bash(\"/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/venv_pylingual/bin/pip\" install git+https://github.com/syssec-utd/pylingual.git)",
+      "Bash('/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/pycdc/pycdas' '/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/live_monitor_RU.exe_extracted/live_monitor_RU.pyc')",
+      "Bash(kill -0 41810)",
+      "Bash(ps -p 41810 -o pid,pcpu,pmem,etime,command)",
+      "Read(//private/tmp/**)",
+      "Bash(sudo lsof -p 41810)",
+      "Bash('/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/venv_pylingual/bin/pylingual' --help)",
+      "Bash('/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/venv_pylingual/bin/pylingual' -v 3.10 -o '/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/decompiled_pylingual' '/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/live_monitor_RU.exe_extracted/live_monitor_RU.pyc')",
+      "Bash(/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/venv_pylingual/bin/python -c ' *)",
+      "Bash('/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/venv_pylingual/bin/python' -c ' *)",
+      "Bash(\"/Users/grammsoli/Downloads/Telegram Desktop/live_monitor_RU_source/tools/venv_pylingual/bin/pip\" install \"xdis<6.3\")",
+      "Bash(curl -sL --compressed 'https://live5.nowgoal26.com/Ajax/SoccerAjax?type=12&id=2982957' -A Mozilla/5.0 -H 'Referer: https://live5.nowgoal26.com/match/h2h-2982957' -o /tmp/sa12.txt -w 'HTTP %{http_code}, size %{size_download}, time %{time_total}s\\\\n')",
+      "Bash(python3 -)"
+    ]
+  }
+}

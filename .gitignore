@@ -1,0 +1,28 @@
+# ── Environment ──
+.env
+.env.*
+!.env.example
+
+# ── Go ──
+backend/server
+backend/bin/
+backend/tmp/
+
+# ── Node ──
+frontend/node_modules/
+frontend/dist/
+frontend/.vinxi/
+
+# ── Playwright ──
+frontend/test-results/
+frontend/playwright-report/
+
+# ── Docker ──
+docker-compose.override.yml
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store

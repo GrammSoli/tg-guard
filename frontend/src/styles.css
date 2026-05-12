@@ -1,0 +1,159 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-trial: var(--trial);
+  --color-trial-foreground: var(--trial-foreground);
+  --color-brand-netflix: var(--brand-netflix);
+  --color-brand-spotify: var(--brand-spotify);
+  --color-brand-youtube: var(--brand-youtube);
+  --color-brand-icloud: var(--brand-icloud);
+  --color-brand-apple: var(--brand-apple);
+  --color-brand-applemusic: var(--brand-applemusic);
+  --color-brand-telegram: var(--brand-telegram);
+  --color-brand-disney: var(--brand-disney);
+  --color-brand-notion: var(--brand-notion);
+}
+
+:root {
+  --radius: 1rem;
+
+  /* Telegram theme variable fallbacks */
+  --tg-safe-area-inset-bottom: 0px;
+  --tg-safe-area-inset-top: 0px;
+
+  --background: oklch(0.16 0.015 270);
+  --foreground: oklch(0.98 0.005 270);
+
+  --surface: oklch(0.21 0.02 270);
+  --surface-elevated: oklch(0.26 0.025 270);
+
+  --card: oklch(0.21 0.02 270);
+  --card-foreground: oklch(0.98 0.005 270);
+
+  --popover: oklch(0.21 0.02 270);
+  --popover-foreground: oklch(0.98 0.005 270);
+
+  --primary: oklch(0.7 0.22 320);
+  --primary-foreground: oklch(0.99 0 0);
+
+  --secondary: oklch(0.26 0.025 270);
+  --secondary-foreground: oklch(0.98 0.005 270);
+
+  --muted: oklch(0.26 0.025 270);
+  --muted-foreground: oklch(0.7 0.02 270);
+
+  --accent: oklch(0.7 0.22 320);
+  --accent-foreground: oklch(0.99 0 0);
+
+  --destructive: oklch(0.65 0.24 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --trial: oklch(0.78 0.16 75);
+  --trial-foreground: oklch(0.2 0.05 75);
+
+  --border: oklch(0.3 0.02 270 / 60%);
+  --input: oklch(0.3 0.02 270);
+  --ring: oklch(0.7 0.22 320);
+
+  --brand-netflix: oklch(0.55 0.24 25);
+  --brand-spotify: oklch(0.72 0.2 150);
+  --brand-youtube: oklch(0.6 0.24 28);
+  --brand-icloud: oklch(0.55 0.02 260);
+  --brand-apple: oklch(0.45 0.02 260);
+  --brand-applemusic: oklch(0.6 0.22 0);
+  --brand-telegram: oklch(0.65 0.16 235);
+  --brand-disney: oklch(0.45 0.18 265);
+  --brand-notion: oklch(0.35 0.01 270);
+
+  /* Calendar tokens */
+  --calendar-today-ring: var(--primary);
+  --calendar-today-ring-width: 2.5px;
+  --calendar-today-ring-opacity: 80%;
+  --calendar-today-bg: color-mix(in oklab, var(--primary) 12%, transparent);
+  --calendar-selected-bg: var(--primary);
+  --calendar-selected-fg: var(--primary-foreground);
+
+  --gradient-primary: linear-gradient(135deg, oklch(0.7 0.22 320), oklch(0.65 0.22 280));
+  --gradient-header: linear-gradient(180deg, oklch(0.2 0.04 290), oklch(0.16 0.015 270));
+  --shadow-elevated: 0 20px 50px -20px oklch(0 0 0 / 0.6);
+  --shadow-fab: 0 12px 30px -8px oklch(0.7 0.22 320 / 0.55);
+}
+
+.dark {
+  --background: oklch(0.16 0.015 270);
+  --foreground: oklch(0.98 0.005 270);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    -webkit-font-smoothing: antialiased;
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display",
+      "Inter", system-ui, sans-serif;
+  }
+}
+
+@utility bg-gradient-primary {
+  background-image: var(--gradient-primary);
+}
+@utility bg-gradient-header {
+  background-image: var(--gradient-header);
+}
+@utility shadow-fab {
+  box-shadow: var(--shadow-fab);
+}
+@utility shadow-elevated {
+  box-shadow: var(--shadow-elevated);
+}
+@utility safe-bottom {
+  padding-bottom: calc(var(--tg-safe-area-inset-bottom) + 1rem);
+}
+@utility safe-top {
+  padding-top: calc(var(--tg-safe-area-inset-top) + 0.5rem);
+}
+
+@keyframes smooth-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@utility animate-smooth-fade {
+  animation: smooth-fade-in 0.25s ease-out;
+}
