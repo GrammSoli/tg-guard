@@ -32,17 +32,18 @@ func (h *UserHandler) GetMe(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"id":            user.ID,
-		"telegram_id":   user.TelegramID,
-		"first_name":    user.FirstName,
-		"last_name":     user.LastName,
-		"username":      user.Username,
-		"photo_url":     user.PhotoURL,
-		"locale":        user.Locale,
-		"timezone":      user.Timezone,
-		"base_currency": user.BaseCurrency,
-		"is_donator":    user.IsDonator,
-		"is_admin":      h.cfg.IsAdmin(user.TelegramID),
+		"id":                    user.ID,
+		"telegram_id":           user.TelegramID,
+		"first_name":            user.FirstName,
+		"last_name":             user.LastName,
+		"username":              user.Username,
+		"photo_url":             user.PhotoURL,
+		"locale":                user.Locale,
+		"timezone":              user.Timezone,
+		"base_currency":         user.BaseCurrency,
+		"is_donator":            user.IsDonator,
+		"is_admin":              h.cfg.IsAdmin(user.TelegramID),
+		"notifications_enabled": user.NotificationsEnabled,
 	})
 }
 
@@ -55,9 +56,10 @@ func (h *UserHandler) UpdateMe(c fiber.Ctx) error {
 	}
 
 	var body struct {
-		Locale       *string `json:"locale"`
-		Timezone     *string `json:"timezone"`
-		BaseCurrency *string `json:"base_currency"`
+		Locale               *string `json:"locale"`
+		Timezone             *string `json:"timezone"`
+		BaseCurrency         *string `json:"base_currency"`
+		NotificationsEnabled *bool   `json:"notifications_enabled"`
 	}
 	if err := c.Bind().JSON(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
@@ -72,6 +74,9 @@ func (h *UserHandler) UpdateMe(c fiber.Ctx) error {
 	}
 	if body.BaseCurrency != nil {
 		updates["base_currency"] = *body.BaseCurrency
+	}
+	if body.NotificationsEnabled != nil {
+		updates["notifications_enabled"] = *body.NotificationsEnabled
 	}
 
 	if len(updates) > 0 && h.db != nil {

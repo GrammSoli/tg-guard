@@ -119,6 +119,7 @@ export const mockUserSettings: UserSettings = {
   locale: "en",
   defaultCurrency: "USD",
   cpaActive: true,
+  notificationsEnabled: true,
 };
 
 export interface SharedRoom {

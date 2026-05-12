@@ -14,6 +14,7 @@ interface MeResponse {
   base_currency: string;
   is_donator: boolean;
   is_admin: boolean;
+  notifications_enabled: boolean;
 }
 
 interface SettingsStore {
@@ -30,6 +31,7 @@ const defaultSettings: UserSettings = {
   isAdmin: false,
   isSubscribed: false,
   cpaActive: false,
+  notificationsEnabled: true,
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -53,6 +55,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           isAdmin: me.is_admin ?? false,
           isSubscribed: me.is_donator ?? false,
           cpaActive: false,
+          notificationsEnabled: me.notifications_enabled ?? true,
         },
         user: {
           name: [me.first_name, me.last_name].filter(Boolean).join(" "),
@@ -74,9 +77,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const next = { ...prev, ...patch };
     set({ settings: next });
 
-    const apiPatch: Record<string, string> = {};
+    const apiPatch: Record<string, string | boolean> = {};
     if (patch.locale) apiPatch.locale = patch.locale;
     if (patch.defaultCurrency) apiPatch.base_currency = patch.defaultCurrency;
+    if (patch.notificationsEnabled !== undefined) {
+      apiPatch.notifications_enabled = patch.notificationsEnabled;
+    }
     if (Object.keys(apiPatch).length === 0) return;
 
     api("/me", { method: "PATCH", body: apiPatch }).catch(async () => {
