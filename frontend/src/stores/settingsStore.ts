@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { UserSettings } from "@/types/subscription";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 interface MeResponse {
   id: number;
@@ -15,6 +15,7 @@ interface MeResponse {
   is_donator: boolean;
   is_admin: boolean;
   notifications_enabled: boolean;
+  notification_time: string;
 }
 
 interface SettingsStore {
@@ -22,7 +23,7 @@ interface SettingsStore {
   user: { name: string; username: string; photoUrl: string } | null;
   loading: boolean;
   fetchProfile: () => Promise<void>;
-  updateSettings: (patch: Partial<UserSettings>) => void;
+  updateSettings: (patch: Partial<UserSettings>) => Promise<void>;
 }
 
 const defaultSettings: UserSettings = {
@@ -32,6 +33,8 @@ const defaultSettings: UserSettings = {
   isSubscribed: false,
   cpaActive: false,
   notificationsEnabled: true,
+  timezone: "UTC",
+  notificationTime: "10:00",
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -56,6 +59,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           isSubscribed: me.is_donator ?? false,
           cpaActive: false,
           notificationsEnabled: me.notifications_enabled ?? true,
+          timezone: me.timezone ?? "UTC",
+          notificationTime: me.notification_time ?? "10:00",
         },
         user: {
           name: [me.first_name, me.last_name].filter(Boolean).join(" "),
@@ -69,10 +74,17 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     }
   },
 
-  updateSettings: (patch) => {
-    // Synchronous state update only — side effects must live outside set().
-    // React 18 strict-mode can execute reducers twice; running fetch/toast
-    // inside would fire twice and create undefined state on rollback.
+  /**
+   * Patch user settings against the backend.
+   *
+   * - Sync state update first (no side-effects inside set; see audit O3).
+   * - PATCH /me, await it, throw on failure so callers can show specific
+   *   error UX. We DON'T silently swallow the error here — the previous
+   *   "Failed to save settings" toast hid real backend errors. The caller
+   *   sees an ApiError with the server's actual message.
+   * - On error: roll the optimistic state back BEFORE rethrowing.
+   */
+  updateSettings: async (patch) => {
     const prev = get().settings;
     const next = { ...prev, ...patch };
     set({ settings: next });
@@ -83,12 +95,19 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     if (patch.notificationsEnabled !== undefined) {
       apiPatch.notifications_enabled = patch.notificationsEnabled;
     }
+    if (patch.timezone) apiPatch.timezone = patch.timezone;
+    if (patch.notificationTime) apiPatch.notification_time = patch.notificationTime;
+
     if (Object.keys(apiPatch).length === 0) return;
 
-    api("/me", { method: "PATCH", body: apiPatch }).catch(async () => {
+    try {
+      await api("/me", { method: "PATCH", body: apiPatch });
+    } catch (err) {
       set({ settings: prev });
-      const { toast } = await import("sonner");
-      toast.error("Failed to save settings");
-    });
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      throw new ApiError(0, (err as Error)?.message ?? "network error");
+    }
   },
 }));

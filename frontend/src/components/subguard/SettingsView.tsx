@@ -58,11 +58,19 @@ export function SettingsView({ settings, user }: Props) {
     setNotificationsSheetOpen(true);
   };
 
-  const pickLanguage = (locale: "ru" | "en") => {
+  const pickLanguage = async (locale: "ru" | "en") => {
     hapticSelection();
     void i18n.changeLanguage(locale);
-    updateSettings({ locale });
     setLanguageSheetOpen(false);
+    try {
+      await updateSettings({ locale });
+    } catch (err) {
+      toast.error(
+        t("toast.settingsSaveFailed", {
+          reason: (err as Error)?.message ?? "unknown",
+        }),
+      );
+    }
   };
 
   // Admin panel deliberately omitted — management now lives natively inside
@@ -144,7 +152,15 @@ export function SettingsView({ settings, user }: Props) {
             return (
               <button
                 key={c}
-                onClick={() => updateSettings({ defaultCurrency: c })}
+                onClick={() => {
+                  updateSettings({ defaultCurrency: c }).catch((err) => {
+                    toast.error(
+                      t("toast.settingsSaveFailed", {
+                        reason: (err as Error)?.message ?? "unknown",
+                      }),
+                    );
+                  });
+                }}
                 className={`flex-1 rounded-xl py-2.5 text-center text-sm font-semibold transition-all ${
                   active
                     ? "bg-gradient-primary text-white shadow-elevated"

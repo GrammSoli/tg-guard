@@ -120,6 +120,8 @@ export const mockUserSettings: UserSettings = {
   defaultCurrency: "USD",
   cpaActive: true,
   notificationsEnabled: true,
+  timezone: "UTC",
+  notificationTime: "10:00",
 };
 
 export interface SharedRoom {

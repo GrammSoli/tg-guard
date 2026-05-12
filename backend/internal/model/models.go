@@ -21,10 +21,15 @@ type User struct {
 	// NotificationsEnabled controls whether the notification worker sends
 	// payment-reminder DMs to this user. Default true to preserve the
 	// pre-existing behaviour for users who registered before this field.
-	NotificationsEnabled bool      `gorm:"default:true;not null" json:"notifications_enabled"`
-	TrafficSourceID      string    `gorm:"size:64" json:"traffic_source_id,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	NotificationsEnabled bool `gorm:"default:true;not null" json:"notifications_enabled"`
+	// NotificationTime is the local-time-of-day ("HH:MM", 24h) at which the
+	// notification worker is allowed to fire reminders to this user. Stored
+	// as a string for simplicity — only the worker parses it. Interpreted in
+	// the user's Timezone above.
+	NotificationTime string    `gorm:"default:'10:00';size:5;not null" json:"notification_time"`
+	TrafficSourceID  string    `gorm:"size:64" json:"traffic_source_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // Subscription represents a user's tracked subscription.
