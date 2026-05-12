@@ -13,6 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { NotificationsSheet } from "./NotificationsSheet";
 import i18n from "@/lib/i18n";
 import { hapticImpact, hapticSelection } from "@/lib/telegram";
 
@@ -38,6 +39,7 @@ export function SettingsView({ settings, user }: Props) {
   const isPremium = settings.isSubscribed;
 
   const [languageSheetOpen, setLanguageSheetOpen] = useState(false);
+  const [notificationsSheetOpen, setNotificationsSheetOpen] = useState(false);
 
   // "Coming soon" handler — backend for these isn't ready yet, but the button
   // shouldn't feel broken. One info toast with localized copy.
@@ -49,6 +51,11 @@ export function SettingsView({ settings, user }: Props) {
   const openLanguageSheet = () => {
     hapticImpact("light");
     setLanguageSheetOpen(true);
+  };
+
+  const openNotificationsSheet = () => {
+    hapticImpact("light");
+    setNotificationsSheetOpen(true);
   };
 
   const pickLanguage = (locale: "ru" | "en") => {
@@ -69,8 +76,10 @@ export function SettingsView({ settings, user }: Props) {
     {
       Icon: Bell,
       label: t("settings.notifications"),
-      hint: t("settings.notificationsHint"),
-      onClick: comingSoon,
+      hint: settings.notificationsEnabled
+        ? t("settings.notificationsHint")
+        : t("settings.notificationsOff"),
+      onClick: openNotificationsSheet,
     },
     {
       Icon: Globe,
@@ -172,6 +181,12 @@ export function SettingsView({ settings, user }: Props) {
           </button>
         ))}
       </div>
+
+      {/* Notifications sheet */}
+      <NotificationsSheet
+        open={notificationsSheetOpen}
+        onOpenChange={setNotificationsSheetOpen}
+      />
 
       {/* Language picker sheet */}
       <Sheet open={languageSheetOpen} onOpenChange={setLanguageSheetOpen}>

@@ -18,9 +18,13 @@ type User struct {
 	Timezone        string    `gorm:"default:UTC;size:64" json:"timezone"`
 	BaseCurrency    string    `gorm:"default:USD;size:3" json:"base_currency"`
 	IsDonator       bool      `gorm:"default:false" json:"is_donator"`
-	TrafficSourceID string    `gorm:"size:64" json:"traffic_source_id,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// NotificationsEnabled controls whether the notification worker sends
+	// payment-reminder DMs to this user. Default true to preserve the
+	// pre-existing behaviour for users who registered before this field.
+	NotificationsEnabled bool      `gorm:"default:true;not null" json:"notifications_enabled"`
+	TrafficSourceID      string    `gorm:"size:64" json:"traffic_source_id,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // Subscription represents a user's tracked subscription.

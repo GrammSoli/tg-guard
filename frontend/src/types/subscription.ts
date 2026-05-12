@@ -70,4 +70,5 @@ export interface UserSettings {
   locale: "en" | "ru";
   defaultCurrency: string;
   cpaActive: boolean;
+  notificationsEnabled: boolean;
 }
