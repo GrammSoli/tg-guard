@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
@@ -12,19 +13,31 @@ import (
 	"github.com/subguard/backend/internal/config"
 	"github.com/subguard/backend/internal/middleware"
 	"github.com/subguard/backend/internal/model"
+	"github.com/subguard/backend/internal/notifier"
 )
 
 // UserHandler handles user profile endpoints.
 type UserHandler struct {
-	cfg *config.Config
-	db  *gorm.DB
+	cfg      *config.Config
+	db       *gorm.DB
+	notifier notifier.Notifier
 }
 
+// NewUserHandler is variadic for DB so existing tests that pass only cfg
+// keep working. notifier is supplied via a separate setter to avoid an
+// even longer variadic signature.
 func NewUserHandler(cfg *config.Config, db ...*gorm.DB) *UserHandler {
 	h := &UserHandler{cfg: cfg}
 	if len(db) > 0 {
 		h.db = db[0]
 	}
+	return h
+}
+
+// WithNotifier sets the notifier used by ExportMe to DM the data dump back
+// to the user. Called from main.go during bootstrap.
+func (h *UserHandler) WithNotifier(n notifier.Notifier) *UserHandler {
+	h.notifier = n
 	return h
 }
 
@@ -124,10 +137,14 @@ func (h *UserHandler) UpdateMe(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// ExportMe returns a GDPR-style data dump for the authenticated user as a
-// JSON attachment: profile + personal subscriptions + every room they touch
-// (with their role per room). The frontend wraps this in a Blob and forces a
-// download.
+// ExportMe assembles a GDPR-style data dump (profile + personal
+// subscriptions + every room the user touches, with role per room) and
+// DMs it back to the user as a JSON document via the Telegram bot.
+//
+// Why not a regular HTTP download? Telegram WebViews on both iOS and
+// Android silently swallow `<a download>` clicks on blob: URLs — the file
+// never reaches the user. Sending through the bot is the canonical TMA
+// pattern: works on every Telegram client, no quirks.
 // GET /api/v1/me/export
 func (h *UserHandler) ExportMe(c fiber.Ctx) error {
 	user := middleware.UserFromCtx(c)
@@ -137,6 +154,9 @@ func (h *UserHandler) ExportMe(c fiber.Ctx) error {
 	if h.db == nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "db unavailable"})
 	}
+	if h.notifier == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "notifier unavailable"})
+	}
 
 	var subs []model.Subscription
 	if err := h.db.Where("user_id = ?", user.ID).Find(&subs).Error; err != nil {
@@ -144,9 +164,6 @@ func (h *UserHandler) ExportMe(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "export failed: " + err.Error()})
 	}
 
-	// Rooms — both owned and joined. Preload services + members so the dump
-	// is self-contained; reviewer of the export shouldn't need a second
-	// query against another table.
 	var rooms []model.SharedRoom
 	if err := h.db.
 		Preload("Services").
@@ -198,9 +215,26 @@ func (h *UserHandler) ExportMe(c fiber.Ctx) error {
 		"rooms":         roomDumps,
 	}
 
-	filename := fmt.Sprintf(`attachment; filename="subguard-export-%d.json"`, user.TelegramID)
-	c.Set(fiber.HeaderContentDisposition, filename)
-	return c.Status(fiber.StatusOK).JSON(dump)
+	content, err := json.MarshalIndent(dump, "", "  ")
+	if err != nil {
+		log.Printf("[user.ExportMe] user=%d marshal error: %v", user.ID, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "marshal failed: " + err.Error()})
+	}
+
+	filename := fmt.Sprintf("subguard-export-%d-%s.json",
+		user.TelegramID,
+		time.Now().UTC().Format("2006-01-02"),
+	)
+	caption := "📦 Your SubGuard data export. Keep this file safe — it contains all of your profile, subscriptions and rooms."
+
+	if err := h.notifier.SendDocument(c.Context(), user.TelegramID, filename, content, caption); err != nil {
+		log.Printf("[user.ExportMe] user=%d send document error: %v", user.ID, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "send failed: " + err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{"sent": true})
 }
 
 // DeleteMe hard-deletes the authenticated user and every owned artifact:
