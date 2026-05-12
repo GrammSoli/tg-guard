@@ -119,6 +119,26 @@ export function expandMiniApp() {
   } catch { /* noop */ }
 }
 
+// ─── External links ────────────────────────────────────────────
+
+/**
+ * openExternalLink — open a URL outside the mini-app.
+ * Prefers Telegram.WebApp.openLink (which opens the user's default browser
+ * in-app) and falls back to window.open in non-TMA contexts.
+ */
+export function openExternalLink(url: string) {
+  try {
+    const openLink = tg()?.openLink as ((u: string) => void) | undefined;
+    if (openLink) {
+      openLink(url);
+      return;
+    }
+  } catch { /* noop */ }
+  if (typeof window !== "undefined") {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
 // ─── User Info ─────────────────────────────────────────────────
 
 export interface TelegramUser {

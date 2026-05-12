@@ -14,6 +14,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { NotificationsSheet } from "./NotificationsSheet";
+import { PrivacySheet } from "./PrivacySheet";
 import i18n from "@/lib/i18n";
 import { hapticImpact, hapticSelection } from "@/lib/telegram";
 
@@ -40,6 +41,7 @@ export function SettingsView({ settings, user }: Props) {
 
   const [languageSheetOpen, setLanguageSheetOpen] = useState(false);
   const [notificationsSheetOpen, setNotificationsSheetOpen] = useState(false);
+  const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
 
   // "Coming soon" handler — backend for these isn't ready yet, but the button
   // shouldn't feel broken. One info toast with localized copy.
@@ -56,6 +58,11 @@ export function SettingsView({ settings, user }: Props) {
   const openNotificationsSheet = () => {
     hapticImpact("light");
     setNotificationsSheetOpen(true);
+  };
+
+  const openPrivacySheet = () => {
+    hapticImpact("light");
+    setPrivacySheetOpen(true);
   };
 
   const pickLanguage = async (locale: "ru" | "en") => {
@@ -99,7 +106,7 @@ export function SettingsView({ settings, user }: Props) {
       Icon: Lock,
       label: t("settings.privacy"),
       hint: t("settings.privacyHint"),
-      onClick: comingSoon,
+      onClick: openPrivacySheet,
     },
     {
       Icon: Sparkles,
@@ -202,6 +209,12 @@ export function SettingsView({ settings, user }: Props) {
       <NotificationsSheet
         open={notificationsSheetOpen}
         onOpenChange={setNotificationsSheetOpen}
+      />
+
+      {/* Privacy sheet */}
+      <PrivacySheet
+        open={privacySheetOpen}
+        onOpenChange={setPrivacySheetOpen}
       />
 
       {/* Language picker sheet */}

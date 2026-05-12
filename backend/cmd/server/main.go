@@ -201,6 +201,8 @@ func main() {
 	userH := handler.NewUserHandler(cfg, db)
 	auth.Get("/me", userH.GetMe)
 	auth.Patch("/me", userH.UpdateMe)
+	auth.Get("/me/export", userH.ExportMe)
+	auth.Delete("/me", userH.DeleteMe)
 
 	// Subscriptions
 	subH := handler.NewSubscriptionHandler(db)
