@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { subDays, subMonths, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay, format } from "date-fns";
+import { ru as ruLocale } from "date-fns/locale/ru";
 import { CalendarIcon, ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Subscription } from "@/types/subscription";
@@ -92,9 +93,11 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
     .sort((a, b) => new Date(a.next_payment_at).getTime() - new Date(b.next_payment_at).getTime())
     .slice(0, 4);
 
+  const dateFnsLocale = locale === "ru" ? ruLocale : undefined;
+
   const rangeLabel =
     activePreset === "custom"
-      ? `${format(dateRange.from, "MMM d")} – ${format(dateRange.to, "MMM d")}`
+      ? `${format(dateRange.from, "d MMM", { locale: dateFnsLocale })} – ${format(dateRange.to, "d MMM", { locale: dateFnsLocale })}`
       : activePreset === "all"
         ? t("analytics.allTime")
         : presets.find((p) => p.key === activePreset) ? t(presets.find((p) => p.key === activePreset)!.labelKey) : "";
@@ -139,6 +142,7 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
               selected={{ from: dateRange.from, to: dateRange.to }}
               onSelect={handleCustomRange}
               numberOfMonths={1}
+              locale={dateFnsLocale}
               className={cn("p-3 pointer-events-auto")}
               disabled={(date) => date > new Date()}
             />
