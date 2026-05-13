@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 
 import { Toaster } from "@/components/ui/sonner";
+import { GlobalModals } from "@/components/subguard/GlobalModals";
 
 function NotFoundComponent() {
   return (
@@ -77,6 +78,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
+      <GlobalModals />
       <Toaster />
     </QueryClientProvider>
   );
