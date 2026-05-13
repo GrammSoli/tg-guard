@@ -146,7 +146,7 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
         <div className="grid grid-cols-7">
           {cells.map((d, i) => {
             if (d === null) {
-              return <div key={i} className="aspect-square" />;
+              return <div key={i} className="min-h-[3.25rem]" />;
             }
             const dateObj = new Date(year, month, d);
             const isToday = sameDay(dateObj, today);
@@ -156,10 +156,10 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
               <button
                 key={i}
                 onClick={() => setSelectedDate(isSelected ? null : dateObj)}
-                className="relative flex aspect-square flex-col items-center justify-center gap-1 rounded-xl transition-colors hover:bg-surface-elevated"
+                className="relative flex min-h-[3.25rem] flex-col items-center pt-1 transition-colors hover:bg-surface-elevated rounded-xl"
               >
                 <span
-                  className={`flex h-8 w-8 items-center justify-center rounded-full text-sm transition-all ${
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm transition-all ${
                     isSelected
                       ? "bg-gradient-primary font-bold text-white shadow-elevated"
                       : isToday
@@ -172,7 +172,7 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
                   {d}
                 </span>
                 {dayBills.length > 0 && (
-                  <div className="flex items-center justify-center">
+                  <div className="absolute bottom-0.5 left-1/2 flex -translate-x-1/2 items-center justify-center">
                     {dayBills.slice(0, CALENDAR_ICON_LIMIT).map((s, idx) => (
                       <span
                         key={s.id}
