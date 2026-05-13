@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useDragScroll } from "@/hooks/useDragScroll";
 import { subDays, subMonths, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay, format } from "date-fns";
 import { ru as ruLocale } from "date-fns/locale/ru";
-import { CalendarIcon, ChevronDown } from "lucide-react";
+import { CalendarIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Subscription } from "@/types/subscription";
 import { formatCurrency, formatDate, localeFor } from "@/lib/format";
@@ -133,12 +133,11 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
             <Button
               variant="outline"
               className={cn(
-                "h-8 shrink-0 gap-1.5 rounded-full border-white/10 px-3 text-[11px] font-semibold",
+                "h-7 w-7 shrink-0 rounded-full border-white/10 p-0",
                 activePreset === "custom" && "border-primary/50 text-primary",
               )}
             >
-              <CalendarIcon className="h-3 w-3" />
-              <ChevronDown className="h-3 w-3 opacity-50" />
+              <CalendarIcon className="h-3.5 w-3.5" />
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="end">
