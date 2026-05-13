@@ -14,6 +14,10 @@ import (
 // implementations (e.g. for E2E tests).
 type Notifier interface {
 	SendMessage(ctx context.Context, chatID int64, text string) error
+	// SendMessageWithMarkup sends a Markdown message with an attached reply
+	// markup (typically an inline keyboard). Used by the renewal-reminder
+	// flow so the user can extend a subscription right from the chat.
+	SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup models.ReplyMarkup) error
 	// SendDocument uploads an in-memory file as a Telegram document with a
 	// caption. Used for one-shot deliveries (data exports etc.) where the
 	// receiving client is a mini-app that can't reliably download blobs.
@@ -36,6 +40,16 @@ func (n *TelegramNotifier) SendMessage(ctx context.Context, chatID int64, text s
 		ChatID:    chatID,
 		Text:      text,
 		ParseMode: "Markdown",
+	})
+	return err
+}
+
+func (n *TelegramNotifier) SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup models.ReplyMarkup) error {
+	_, err := n.bot.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:      chatID,
+		Text:        text,
+		ParseMode:   "Markdown",
+		ReplyMarkup: markup,
 	})
 	return err
 }
@@ -64,6 +78,11 @@ func NewMockNotifier() *MockNotifier {
 func (n *MockNotifier) SendMessage(_ context.Context, chatID int64, text string) error {
 	log.Printf("[mock-notifier] would send to %d: %s", chatID, text)
 	fmt.Printf("[mock-notifier] chatID=%d text=%q\n", chatID, text)
+	return nil
+}
+
+func (n *MockNotifier) SendMessageWithMarkup(_ context.Context, chatID int64, text string, _ models.ReplyMarkup) error {
+	log.Printf("[mock-notifier] would send to %d (with markup): %s", chatID, text)
 	return nil
 }
 
