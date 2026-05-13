@@ -18,6 +18,12 @@ export interface SwipeGestureResult {
   cardRef: React.RefObject<HTMLDivElement | null>;
   /** Whether the card is mid-swipe (disable CSS transition when true) */
   isSwiping: boolean;
+  /**
+   * True if the most recent pointer interaction was a horizontal drag
+   * rather than a stationary click. Card onClick handlers should
+   * early-return when this is true to avoid opening a sheet after a swipe.
+   */
+  didDrag: boolean;
   /** Touch handlers */
   onTouchStart: (e: TouchEvent) => void;
   onTouchMove: (e: TouchEvent) => void;
@@ -47,6 +53,9 @@ export function useSwipeGesture(disabled = false, onOpen?: () => void): SwipeGes
   const lastMoveX = useRef(0);
   const velocity = useRef(0);
   const mouseActive = useRef(false);
+  /** True when the current gesture moved enough to be a drag, not a click */
+  const didDragRef = useRef(false);
+  const [didDrag, setDidDrag] = useState(false);
 
   const [offset, setOffset] = useState(0);
   const [open, setOpen] = useState(false);
@@ -116,6 +125,10 @@ export function useSwipeGesture(disabled = false, onOpen?: () => void): SwipeGes
 
     if (!lockedAxis.current && (Math.abs(dx) > AXIS_LOCK_DISTANCE || Math.abs(dy) > AXIS_LOCK_DISTANCE)) {
       lockedAxis.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      if (lockedAxis.current === "x") {
+        didDragRef.current = true;
+        setDidDrag(true);
+      }
     }
 
     if (lockedAxis.current === "y") {
@@ -152,8 +165,11 @@ export function useSwipeGesture(disabled = false, onOpen?: () => void): SwipeGes
   const handleMouseDown = useCallback((e: ReactMouseEvent) => {
     if (animating.current || disabled) return;
     if (e.button !== 0) return;
-    e.preventDefault();
+    // Do NOT preventDefault here — it kills the native click event.
+    // CSS `select-none` on the card container prevents text selection.
     mouseActive.current = true;
+    didDragRef.current = false;
+    setDidDrag(false);
     startX.current = e.clientX;
     startY.current = e.clientY;
     currentX.current = open ? -SNAP_OPEN : 0;
@@ -173,6 +189,10 @@ export function useSwipeGesture(disabled = false, onOpen?: () => void): SwipeGes
 
       if (!lockedAxis.current && (Math.abs(dx) > AXIS_LOCK_DISTANCE || Math.abs(dy) > AXIS_LOCK_DISTANCE)) {
         lockedAxis.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+        if (lockedAxis.current === "x") {
+          didDragRef.current = true;
+          setDidDrag(true);
+        }
       }
 
       if (lockedAxis.current === "y") {
@@ -225,6 +245,7 @@ export function useSwipeGesture(disabled = false, onOpen?: () => void): SwipeGes
     isOpen: open,
     cardRef,
     isSwiping,
+    didDrag,
     onTouchStart: handleTouchStart,
     onTouchMove: handleTouchMove,
     onTouchEnd: handleTouchEnd,

@@ -51,6 +51,7 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
 
   const handleCardClick = useCallback(
     (s: Subscription) => {
+      if (swipe.didDrag) return;
       if (swipe.isOpen) {
         swipe.close();
         return;
