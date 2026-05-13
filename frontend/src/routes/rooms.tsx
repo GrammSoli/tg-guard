@@ -8,7 +8,7 @@ import { formatCurrency, localeFor } from "@/lib/format";
 import { convertCurrency } from "@/lib/currencyRates";
 import { SharedRoomSheet } from "@/components/subguard/SharedRoomSheet";
 import { CreateRoomSheet } from "@/components/subguard/CreateRoomSheet";
-import { ServiceLogo } from "@/components/subguard/ServiceLogo";
+import { SwipeableRoomCard } from "@/components/subguard/SwipeableRoomCard";
 import { hapticImpact } from "@/lib/telegram";
 
 export const Route = createFileRoute("/rooms")({
@@ -29,7 +29,7 @@ const SORT_STORAGE_KEY = "rooms.sort";
 function RoomsPage() {
   const { t, i18n } = useTranslation();
   const lc = localeFor(i18n.language);
-  const { rooms, fetchRooms } = useRoomStore();
+  const { rooms, fetchRooms, deleteRoom } = useRoomStore();
   const { settings } = useSettingsStore();
   const userCurrency = settings.defaultCurrency;
   const navigate = useNavigate();
@@ -181,38 +181,14 @@ function RoomsPage() {
             const displayAmount = convertCurrency(rawAmount, room.currency, userCurrency);
 
             return (
-              <button
+              <SwipeableRoomCard
                 key={room.id}
-                onClick={() => {
-                  hapticImpact("light");
-                  setActiveRoomId(room.id);
-                }}
-                className="bg-surface hover:bg-surface-elevated flex w-full items-center justify-between rounded-xl border border-white/10 p-4 text-left transition-colors"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold">{room.name}</p>
-                  <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <Users className="h-3 w-3" />
-                    <span>{t("dashboard.members", { count: room.members })}</span>
-                    <span className="opacity-50">•</span>
-                    <span className="font-medium text-foreground">
-                      {formatCurrency(displayAmount, userCurrency, lc)} {t("dashboard.perMonth")}
-                    </span>
-                  </div>
-                </div>
-                <div className="ml-3 flex -space-x-1.5">
-                  {room.services.slice(0, 4).map((s, i) => (
-                    <ServiceLogo
-                      key={i}
-                      brand={s.brand}
-                      name={s.brand}
-                      size={24}
-                      rounded="full"
-                      className="border border-background"
-                    />
-                  ))}
-                </div>
-              </button>
+                room={room}
+                displayAmount={displayAmount}
+                userCurrency={userCurrency}
+                onClick={(id) => setActiveRoomId(id)}
+                onDelete={(id) => deleteRoom(id)}
+              />
             );
           })
         )}
