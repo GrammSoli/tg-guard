@@ -156,7 +156,7 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
               <button
                 key={i}
                 onClick={() => setSelectedDate(isSelected ? null : dateObj)}
-                className="relative flex min-h-[3.25rem] flex-col items-center pt-1 transition-colors hover:bg-surface-elevated rounded-xl"
+                className="relative flex min-h-[3.25rem] flex-col items-center pt-1 overflow-visible bg-transparent p-0"
               >
                 <span
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm transition-all ${
@@ -165,14 +165,14 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
                       : isToday
                         ? "bg-primary/15 text-primary font-semibold ring-1.5 ring-primary/40"
                         : dayBills.length > 0
-                          ? "font-medium text-foreground"
-                          : "text-muted-foreground"
+                          ? "font-medium text-foreground hover:bg-surface-elevated"
+                          : "text-muted-foreground hover:bg-surface-elevated"
                   }`}
                 >
                   {d}
                 </span>
                 {dayBills.length > 0 && (
-                  <div className="absolute bottom-0.5 left-1/2 flex -translate-x-1/2 items-center justify-center">
+                  <div className="absolute -bottom-1 left-1/2 flex -translate-x-1/2 items-center justify-center">
                     {dayBills.slice(0, CALENDAR_ICON_LIMIT).map((s, idx) => (
                       <span
                         key={s.id}
