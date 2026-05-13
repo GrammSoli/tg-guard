@@ -274,5 +274,9 @@
   "room.confirmUnpayTitle": "Revert payment",
   "room.confirmUnpayDesc": "Mark {{name}} as unpaid?",
   "room.confirmPay": "Confirm",
-  "room.confirmUnpay": "Revert"
+  "room.confirmUnpay": "Revert",
+  "room.customService": "Custom service",
+  "room.customServiceHint": "Add a custom payment or service",
+  "room.noteRequired": "Note required to distinguish duplicates",
+  "room.noteRequiredPh": "e.g. For parents"
 }

@@ -85,10 +85,13 @@ func (h *RoomHandler) Create(c fiber.Ctx) error {
 		Name     string `json:"name"`
 		Currency string `json:"currency"`
 		Services []struct {
-			Brand   string  `json:"brand"`
-			Name    string  `json:"name"`
-			Amount  float64 `json:"amount"`
-			Currency string `json:"currency"`
+			Brand     string  `json:"brand"`
+			Name      string  `json:"name"`
+			Amount    float64 `json:"amount"`
+			Currency  string  `json:"currency"`
+			Note      string  `json:"note"`
+			IconName  string  `json:"icon_name"`
+			IconColor string  `json:"icon_color"`
 		} `json:"services"`
 	}
 	if err := c.Bind().JSON(&body); err != nil || body.Name == "" {
@@ -102,7 +105,10 @@ func (h *RoomHandler) Create(c fiber.Ctx) error {
 		Members:    []model.RoomMember{{UserID: user.ID, Name: user.FirstName, Username: user.Username, Avatar: user.PhotoURL, HasPaid: true}},
 	}
 	for _, s := range body.Services {
-		room.Services = append(room.Services, model.RoomService{Brand: s.Brand, Name: s.Name, Amount: s.Amount, Currency: s.Currency})
+		room.Services = append(room.Services, model.RoomService{
+			Brand: s.Brand, Name: s.Name, Amount: s.Amount, Currency: s.Currency,
+			Note: s.Note, IconName: s.IconName, IconColor: s.IconColor,
+		})
 	}
 	if err := h.repo.Create(&room); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "create failed"})
@@ -308,11 +314,20 @@ func (h *RoomHandler) AddService(c fiber.Ctx) error {
 		return c.Status(403).JSON(fiber.Map{"error": "forbidden"})
 	}
 	var body struct {
-		Brand string `json:"brand"`; Name string `json:"name"`
-		Amount float64 `json:"amount"`; Currency string `json:"currency"`
+		Brand     string  `json:"brand"`
+		Name      string  `json:"name"`
+		Amount    float64 `json:"amount"`
+		Currency  string  `json:"currency"`
+		Note      string  `json:"note"`
+		IconName  string  `json:"icon_name"`
+		IconColor string  `json:"icon_color"`
 	}
 	c.Bind().JSON(&body)
-	h.repo.AddService(&model.RoomService{RoomID: roomID, Brand: body.Brand, Name: body.Name, Amount: body.Amount, Currency: body.Currency})
+	h.repo.AddService(&model.RoomService{
+		RoomID: roomID, Brand: body.Brand, Name: body.Name,
+		Amount: body.Amount, Currency: body.Currency,
+		Note: body.Note, IconName: body.IconName, IconColor: body.IconColor,
+	})
 	return c.Status(201).JSON(fiber.Map{"ok": true})
 }
 
