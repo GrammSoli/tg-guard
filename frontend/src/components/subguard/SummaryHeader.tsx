@@ -1,7 +1,7 @@
 import { formatCurrency, localeFor } from "@/lib/format";
 import { useTranslation } from "react-i18next";
 import { convertCurrency } from "@/lib/currencyRates";
-import { ArrowUpRight, Bell } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import type { UserSettings } from "@/types/subscription";
 
 interface Props {
@@ -10,7 +10,6 @@ interface Props {
   currency: string;
   user?: { name: string };
   settings: UserSettings;
-  onBellClick?: () => void;
 }
 
 export function SummaryHeader({
@@ -19,7 +18,6 @@ export function SummaryHeader({
   currency,
   user,
   settings,
-  onBellClick,
 }: Props) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
@@ -32,20 +30,9 @@ export function SummaryHeader({
 
   return (
     <header className="safe-top relative px-5 pb-6 pt-4">
-      <div className="mb-5 flex items-center justify-between">
-        <div>
-          <p className="text-xs text-muted-foreground">{t("welcome.greeting")}</p>
-          <p className="text-base font-semibold">{user?.name ?? "Alex"}</p>
-        </div>
-        <button
-          onClick={onBellClick}
-          className="bg-surface-elevated relative flex h-10 w-10 items-center justify-center rounded-full transition-transform active:scale-95"
-        >
-          <Bell className="h-4 w-4" />
-          {settings.isSubscribed && (
-            <span className="bg-primary absolute right-2 top-2 h-2 w-2 rounded-full" />
-          )}
-        </button>
+      <div className="mb-5">
+        <p className="text-xs text-muted-foreground">{t("welcome.greeting")}</p>
+        <p className="text-base font-semibold">{user?.name ?? "Alex"}</p>
       </div>
 
       <div
