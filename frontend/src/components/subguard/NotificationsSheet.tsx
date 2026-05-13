@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Bell, Clock } from "lucide-react";
+import { Bell, Clock, Globe } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -39,6 +39,36 @@ const TIME_OPTIONS = [
   "21:00",
 ];
 
+const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: "Pacific/Honolulu", label: "Гонолулу (UTC-10)" },
+  { value: "America/Anchorage", label: "Аляска (UTC-9)" },
+  { value: "America/Los_Angeles", label: "Лос-Анджелес (UTC-8)" },
+  { value: "America/Denver", label: "Денвер (UTC-7)" },
+  { value: "America/Chicago", label: "Чикаго (UTC-6)" },
+  { value: "America/New_York", label: "Нью-Йорк (UTC-5)" },
+  { value: "America/Sao_Paulo", label: "Сан-Паулу (UTC-3)" },
+  { value: "Atlantic/Reykjavik", label: "Рейкьявик (UTC+0)" },
+  { value: "Europe/London", label: "Лондон (UTC+0/+1)" },
+  { value: "Europe/Berlin", label: "Берлин (UTC+1/+2)" },
+  { value: "Europe/Istanbul", label: "Стамбул (UTC+3)" },
+  { value: "Europe/Moscow", label: "Москва (UTC+3)" },
+  { value: "Europe/Samara", label: "Самара (UTC+4)" },
+  { value: "Asia/Tbilisi", label: "Тбилиси (UTC+4)" },
+  { value: "Asia/Dubai", label: "Дубай (UTC+4)" },
+  { value: "Asia/Yekaterinburg", label: "Екатеринбург (UTC+5)" },
+  { value: "Asia/Tashkent", label: "Ташкент (UTC+5)" },
+  { value: "Asia/Almaty", label: "Алматы (UTC+6)" },
+  { value: "Asia/Novosibirsk", label: "Новосибирск (UTC+7)" },
+  { value: "Asia/Bangkok", label: "Бангкок (UTC+7)" },
+  { value: "Asia/Irkutsk", label: "Иркутск (UTC+8)" },
+  { value: "Asia/Shanghai", label: "Шанхай (UTC+8)" },
+  { value: "Asia/Tokyo", label: "Токио (UTC+9)" },
+  { value: "Asia/Vladivostok", label: "Владивосток (UTC+10)" },
+  { value: "Asia/Kamchatka", label: "Камчатка (UTC+12)" },
+  { value: "Australia/Sydney", label: "Сидней (UTC+10/+11)" },
+  { value: "Pacific/Auckland", label: "Окленд (UTC+12/+13)" },
+];
+
 function detectBrowserTimezone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -70,6 +100,12 @@ export function NotificationsSheet({ open, onOpenChange }: Props) {
 
   const [savingToggle, setSavingToggle] = useState(false);
   const [savingTime, setSavingTime] = useState(false);
+  const [savingTz, setSavingTz] = useState(false);
+
+  // Effective timezone: use stored value, fallback to browser detection
+  const effectiveTz = storedTimezone && storedTimezone !== "UTC"
+    ? storedTimezone
+    : detectBrowserTimezone();
 
   // Silent timezone sync. Fires once when the sheet becomes visible: if the
   // browser's IANA tz differs from what we have on file, push it. No toast,
@@ -113,6 +149,20 @@ export function NotificationsSheet({ open, onOpenChange }: Props) {
       reportError(err);
     } finally {
       setSavingTime(false);
+    }
+  };
+
+  const handleTimezoneChange = async (value: string) => {
+    if (savingTz || value === storedTimezone) return;
+    hapticSelection();
+    setSavingTz(true);
+    try {
+      await updateSettings({ timezone: value });
+      toast.success(t("notifications.timezoneSaved"));
+    } catch (err) {
+      reportError(err);
+    } finally {
+      setSavingTz(false);
     }
   };
 
@@ -175,6 +225,39 @@ export function NotificationsSheet({ open, onOpenChange }: Props) {
                   {TIME_OPTIONS.map((time) => (
                     <SelectItem key={time} value={time}>
                       {time}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Timezone selector */}
+          {notificationsEnabled && (
+            <div className="bg-surface flex w-full items-center gap-3 rounded-2xl p-4 text-left">
+              <div className="bg-surface-elevated flex h-10 w-10 items-center justify-center rounded-xl">
+                <Globe className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">
+                  {t("notifications.timezoneLabel", "Часовой пояс")}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {t("notifications.timezoneHint", "Уведомления приходят по вашему времени")}
+                </p>
+              </div>
+              <Select
+                value={effectiveTz}
+                onValueChange={handleTimezoneChange}
+                disabled={savingTz}
+              >
+                <SelectTrigger className="w-36 border-0 bg-surface-elevated text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {TIMEZONE_OPTIONS.map((tz) => (
+                    <SelectItem key={tz.value} value={tz.value}>
+                      {tz.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
