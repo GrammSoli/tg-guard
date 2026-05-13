@@ -62,7 +62,6 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
   const [period, setPeriod] = useState<BillingPeriod>("monthly");
   const [nextDate, setNextDate] = useState(todayIso());
   const [isTrial, setIsTrial] = useState(false);
-  const [trialEnd, setTrialEnd] = useState(todayIso());
   const [autoPay, setAutoPay] = useState(true);
   // Custom-subscription appearance. Only sent to the API when brand
   // resolves to "default" (i.e. it's actually a custom sub).
@@ -84,7 +83,6 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       setPeriod(initial.period);
       setNextDate(initial.next_payment_at.slice(0, 10));
       setIsTrial(initial.is_trial);
-      setTrialEnd((initial.trial_ends_at ?? todayIso()).slice(0, 10));
       setAutoPay(initial.is_auto_pay);
     } else {
       setStep("catalog");
@@ -99,7 +97,6 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       setPeriod("monthly");
       setNextDate(todayIso());
       setIsTrial(false);
-      setTrialEnd(todayIso());
       setAutoPay(true);
     }
   }, [open, initial]);
@@ -137,7 +134,7 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       period,
       next_payment_at: new Date(nextDate).toISOString(),
       is_trial: isTrial,
-      trial_ends_at: isTrial ? new Date(trialEnd).toISOString() : null,
+      trial_ends_at: isTrial ? new Date(nextDate).toISOString() : null,
       is_auto_pay: autoPay,
     });
     onOpenChange(false);
@@ -271,7 +268,12 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
               </Select>
             </Field>
 
-            <Field label={t("modal.nextPayment")}>
+            <Row
+              label={t("modal.trialConnected")}
+              control={<Switch checked={isTrial} onCheckedChange={setIsTrial} />}
+            />
+
+            <Field label={isTrial ? t("modal.trialEnds") : t("modal.nextPayment")}>
               <DatePickerField
                 value={nextDate}
                 onChange={setNextDate}
@@ -302,20 +304,6 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
                 maxLength={128}
               />
             </Field>
-
-            <Row
-              label={t("modal.trialConnected")}
-              control={<Switch checked={isTrial} onCheckedChange={setIsTrial} />}
-            />
-            {isTrial && (
-              <Field label={t("modal.trialEnds")}>
-                <DatePickerField
-                  value={trialEnd}
-                  onChange={setTrialEnd}
-                  locale={locale}
-                />
-              </Field>
-            )}
 
             <Row
               label={t("modal.autoPay")}
