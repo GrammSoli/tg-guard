@@ -95,6 +95,16 @@ export function PrivacySheet({ open, onOpenChange }: Props) {
     try {
       await api("/me", { method: "DELETE" });
       toast.success(t("privacy.deleteSuccess"));
+
+      // Wipe all client-side state immediately so deleted PII is not
+      // accessible in memory during the fallback reload window.
+      const { useSubscriptionStore } = await import("@/stores/subscriptionStore");
+      const { useRoomStore } = await import("@/stores/roomStore");
+      const { useSettingsStore } = await import("@/stores/settingsStore");
+      useSubscriptionStore.setState({ items: [], filter: "", error: null });
+      useRoomStore.setState({ rooms: [], activeDetail: null, error: null });
+      useSettingsStore.setState({ user: null });
+
       // Try graceful Telegram close first. If we're not inside Telegram
       // (e.g. dev preview in a browser) close() no-ops, so fall back to a
       // full reload after a short pause so any in-flight requests don't see

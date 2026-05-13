@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"fmt"
+
 	"gorm.io/gorm"
 
 	"github.com/subguard/backend/internal/model"
@@ -102,13 +104,16 @@ func (r *AdminRepo) ListCampaigns() ([]model.TrafficCampaign, error) {
 }
 
 func (r *AdminRepo) IncrementCampaign(tag string, field string) error {
-	result := r.db.Model(&model.TrafficCampaign{}).Where("tag = ?", tag).Update(field, gorm.Expr(field+" + 1"))
-	if result.RowsAffected == 0 {
-		campaign := model.TrafficCampaign{Tag: tag}
-		if err := r.db.Create(&campaign).Error; err != nil {
-			return err
-		}
-		return r.db.Model(&campaign).Update(field, gorm.Expr(field+" + 1")).Error
+	// Defence-in-depth: only allow known column names to prevent SQL injection
+	// via the interpolated field parameter.
+	allowed := map[string]bool{"clicks": true, "bot_starts": true, "auths": true}
+	if !allowed[field] {
+		return fmt.Errorf("invalid campaign field: %q", field)
 	}
-	return result.Error
+	return r.db.Exec(
+		`INSERT INTO traffic_campaigns (tag, `+field+`, created_at, updated_at)
+		 VALUES (?, 1, NOW(), NOW())
+		 ON CONFLICT (tag) DO UPDATE SET `+field+` = traffic_campaigns.`+field+` + 1, updated_at = NOW()`,
+		tag,
+	).Error
 }

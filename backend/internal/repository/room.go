@@ -105,8 +105,8 @@ func (r *RoomRepo) AddService(svc *model.RoomService) error {
 	return r.db.Create(svc).Error
 }
 
-func (r *RoomRepo) RemoveService(roomID uuid.UUID, brand string) error {
-	return r.db.Where("room_id = ? AND brand = ?", roomID, brand).Delete(&model.RoomService{}).Error
+func (r *RoomRepo) RemoveService(roomID uuid.UUID, serviceID uint) error {
+	return r.db.Where("room_id = ? AND id = ?", roomID, serviceID).Delete(&model.RoomService{}).Error
 }
 
 func (r *RoomRepo) GetUnpaidMembers(roomID uuid.UUID) ([]model.RoomMember, error) {

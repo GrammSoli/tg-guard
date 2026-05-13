@@ -230,7 +230,7 @@ func main() {
 	auth.Patch("/rooms/:id/members/:uid/pay", roomH.MarkPaid)
 	auth.Patch("/rooms/:id/members/:uid/unpay", roomH.MarkUnpaid)
 	auth.Post("/rooms/:id/services", roomH.AddService)
-	auth.Delete("/rooms/:id/services/:brand", roomH.RemoveService)
+	auth.Delete("/rooms/:id/services/:sid", roomH.RemoveService)
 	auth.Delete("/rooms/:id/members/:uid", roomH.RemoveMember)
 	auth.Patch("/rooms/:id", roomH.UpdateRoom)
 

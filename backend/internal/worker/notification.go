@@ -12,6 +12,7 @@ import (
 
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/notifier"
+	"github.com/subguard/backend/internal/tgutil"
 )
 
 // NotificationWorker checks upcoming payments and sends Telegram reminders.
@@ -40,14 +41,7 @@ const notificationTickInterval = 30 * time.Minute
 // per renewal date even if the worker scans every 30 minutes.
 const notificationDedupWindow = 20 * time.Hour
 
-// renewCallbackPrefix / cancelCallbackPrefix are the CallbackData prefixes
-// written into the inline keyboard attached to every reminder. The bot
-// dispatches on these prefixes. Both formats are "<prefix><uuid>", 46/47
-// bytes — well under Telegram's 64-byte limit.
-const (
-	renewCallbackPrefix  = "renew_sub_"
-	cancelCallbackPrefix = "cancel_sub_"
-)
+// Callback prefixes imported from tgutil — shared with bot package.
 
 // Start launches the notification check loop every 30 minutes.
 func (w *NotificationWorker) Start(ctx context.Context) {
@@ -86,7 +80,9 @@ func (w *NotificationWorker) check(ctx context.Context) {
 
 	var subs []model.Subscription
 	err := w.db.WithContext(ctx).
-		Preload("User").
+		Preload("User", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id, telegram_id, username, notifications_enabled, timezone, notification_time, locale")
+		}).
 		Where("next_payment_at BETWEEN ? AND ?", windowStart, windowEnd).
 		Where("notified_at IS NULL OR notified_at < ?", now.Add(-notificationDedupWindow)).
 		Find(&subs).Error
@@ -220,11 +216,11 @@ func renewKeyboard(sub *model.Subscription, locale string) *models.InlineKeyboar
 		InlineKeyboard: [][]models.InlineKeyboardButton{{
 			{
 				Text:         renewButtonLabel(locale),
-				CallbackData: renewCallbackPrefix + sub.ID.String(),
+				CallbackData: tgutil.RenewCallbackPrefix + sub.ID.String(),
 			},
 			{
 				Text:         cancelButtonLabel(locale),
-				CallbackData: cancelCallbackPrefix + sub.ID.String(),
+				CallbackData: tgutil.CancelCallbackPrefix + sub.ID.String(),
 			},
 		}},
 	}
@@ -288,18 +284,9 @@ func buildReminderText(sub *model.Subscription, locale string) string {
 	}
 }
 
-// escapeTelegramMarkdown escapes the characters that Telegram's legacy
-// Markdown parse mode interprets: * _ ` [ . Strict enough to keep the
-// subscription's bold name intact even if the user's note contains those.
-var telegramMarkdownReplacer = strings.NewReplacer(
-	"*", `\*`,
-	"_", `\_`,
-	"`", "\\`",
-	"[", `\[`,
-)
-
+// escapeTelegramMarkdown delegates to the shared tgutil package.
 func escapeTelegramMarkdown(s string) string {
-	return telegramMarkdownReplacer.Replace(s)
+	return tgutil.EscapeMarkdown(s)
 }
 
 // isValidHHMM verifies that a stored notification_time is in the strict

@@ -13,7 +13,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { POPULAR_SERVICES } from "@/lib/mockData";
-import type { BrandKey } from "@/types/subscription";
+
 import { formatCurrency, formatDate, localeFor } from "@/lib/format";
 import { convertCurrency } from "@/lib/currencyRates";
 import { useTranslation } from "react-i18next";
@@ -68,7 +68,7 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
   const locale = i18n.language;
   const lc = localeFor(locale);
   const [picking, setPicking] = useState(false);
-  const [pendingRemoveBrand, setPendingRemoveBrand] = useState<string | null>(null);
+  const [pendingRemoveService, setPendingRemoveService] = useState<{ id: number; brand: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [reminding, setReminding] = useState(false);
   const [serviceSearch, setServiceSearch] = useState("");
@@ -192,11 +192,11 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
   };
 
   const confirmRemove = async () => {
-    if (!room || !pendingRemoveBrand) return;
+    if (!room || !pendingRemoveService) return;
     try {
-      await removeService(room.id, pendingRemoveBrand as BrandKey);
+      await removeService(room.id, pendingRemoveService.id);
       hapticNotification("warning");
-      setPendingRemoveBrand(null);
+      setPendingRemoveService(null);
     } catch {
       hapticNotification("error");
       toast.error(t("toast.removeServiceFailed"));
@@ -551,7 +551,7 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
                   </div>
                   {room.is_owner && (
                     <button
-                      onClick={() => setPendingRemoveBrand(s.brand)}
+                      onClick={() => setPendingRemoveService({ id: s.id, brand: s.brand })}
                       aria-label={`Remove ${s.brand}`}
                       className="bg-surface-elevated hover:bg-destructive/20 hover:text-destructive flex h-9 w-9 items-center justify-center rounded-full transition-colors active:scale-90"
                     >
@@ -592,14 +592,14 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
       </SheetContent>
 
       <AlertDialog
-        open={!!pendingRemoveBrand}
-        onOpenChange={(o) => !o && setPendingRemoveBrand(null)}
+        open={!!pendingRemoveService}
+        onOpenChange={(o) => !o && setPendingRemoveService(null)}
       >
         <AlertDialogContent className="rounded-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle>{t("room.removeServiceTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("room.removeServiceDesc", { brand: pendingRemoveBrand, room: room?.name })}
+              {t("room.removeServiceDesc", { brand: pendingRemoveService?.brand, room: room?.name })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
