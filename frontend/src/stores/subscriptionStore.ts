@@ -1,13 +1,36 @@
 import { create } from "zustand";
 import type { Subscription } from "@/types/subscription";
+import type { ServiceCategory } from "@/lib/mockData";
 import { api } from "@/lib/api";
+
+/** How to order the merged subscriptions/rooms list. */
+export type SortBy = "nextPayment" | "priceDesc" | "priceAsc" | "alphabetical";
+
+/** Which item kinds are visible. Empty set = show ALL kinds (no-op filter). */
+export type FilterType = "subscription" | "room";
+
+export const DEFAULT_SORT: SortBy = "nextPayment";
 
 interface SubscriptionStore {
   items: Subscription[];
   loading: boolean;
   error: string | null;
   filter: string;
+
+  // Advanced filter state — drives FilterSheet + Dashboard's derived list.
+  sortBy: SortBy;
+  filterTypes: FilterType[];
+  filterCategories: ServiceCategory[];
+
   setFilter: (q: string) => void;
+  setSortBy: (s: SortBy) => void;
+  setFilterTypes: (t: FilterType[]) => void;
+  setFilterCategories: (c: ServiceCategory[]) => void;
+  /** Restore the "no filters applied" state. Does NOT touch the search input. */
+  resetFilters: () => void;
+  /** True iff any non-default filter is currently active. Drives the indicator dot on the filter button. */
+  hasActiveFilters: () => boolean;
+
   fetchSubscriptions: () => Promise<void>;
   addSubscription: (s: Omit<Subscription, "id">) => Promise<void>;
   updateSubscription: (id: string, data: Partial<Subscription>) => Promise<void>;
@@ -20,7 +43,29 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
   loading: false,
   error: null,
   filter: "",
+
+  sortBy: DEFAULT_SORT,
+  filterTypes: [],
+  filterCategories: [],
+
   setFilter: (q) => set({ filter: q }),
+  setSortBy: (s) => set({ sortBy: s }),
+  setFilterTypes: (t) => set({ filterTypes: t }),
+  setFilterCategories: (c) => set({ filterCategories: c }),
+  resetFilters: () =>
+    set({
+      sortBy: DEFAULT_SORT,
+      filterTypes: [],
+      filterCategories: [],
+    }),
+  hasActiveFilters: () => {
+    const s = get();
+    return (
+      s.sortBy !== DEFAULT_SORT ||
+      s.filterTypes.length > 0 ||
+      s.filterCategories.length > 0
+    );
+  },
 
   fetchSubscriptions: async () => {
     set({ loading: true, error: null });

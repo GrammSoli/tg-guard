@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDeepLinkHandler } from "@/hooks/use-deep-link";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import type { PartnerOffer, Subscription } from "@/types/subscription";
 import type { RoomSummary } from "@/types/room";
+import type { ServiceCategory } from "@/lib/mockData";
 import { convertCurrency } from "@/lib/currencyRates";
 import { periodToMonthly } from "@/lib/subscriptionMath";
 import { hapticImpact, hapticNotification, hapticSelection, initTelegramApp } from "@/lib/telegram";
@@ -11,6 +13,7 @@ import { useTelegramBackButton } from "@/hooks/use-telegram-back";
 import { useTranslation } from "react-i18next";
 import { SummaryHeader } from "./SummaryHeader";
 import { FilterBar } from "./FilterBar";
+import { FilterSheet } from "./FilterSheet";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { SwipeableSubscriptionCard } from "./SwipeableSubscriptionCard";
 import { PartnerOffers } from "./PartnerOffers";
@@ -47,12 +50,17 @@ export function Dashboard({ partnerOffers, user }: Props) {
   const items = useSubscriptionStore((s) => s.items);
   const filter = useSubscriptionStore((s) => s.filter);
   const setFilter = useSubscriptionStore((s) => s.setFilter);
+  const sortBy = useSubscriptionStore((s) => s.sortBy);
+  const filterTypes = useSubscriptionStore((s) => s.filterTypes);
+  const filterCategories = useSubscriptionStore((s) => s.filterCategories);
   const addSubscription = useSubscriptionStore((s) => s.addSubscription);
   const updateSubscription = useSubscriptionStore((s) => s.updateSubscription);
   const deleteSubscription = useSubscriptionStore((s) => s.deleteSubscription);
   const rooms = useRoomStore((s) => s.rooms);
   const fetchRooms = useRoomStore((s) => s.fetchRooms);
   const fetchDetail = useRoomStore((s) => s.fetchDetail);
+
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const { t } = useTranslation();
@@ -103,15 +111,67 @@ export function Dashboard({ partnerOffers, user }: Props) {
 
   useTelegramBackButton(isSubPage, handleBack);
 
-  const filtered = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        (s.tag ?? "").toLowerCase().includes(q),
-    );
-  }, [items, filter]);
+  // Debounce search so typing isn't laggy on long subscription lists.
+  const debouncedFilter = useDebouncedValue(filter, 200);
+
+  // ── Filter pipeline ────────────────────────────────────
+  // Order matters: search → type → category → sort. Each step shrinks the
+  // working set so the final sort runs on the smallest possible array.
+  //
+  // The `type` filter is interpreted as "user-asked-for-these-kinds": if
+  // they DID check boxes, only those kinds render. If the box set is empty
+  // (default state) it's a no-op and everything stays.
+  const showSubscriptions =
+    filterTypes.length === 0 || filterTypes.includes("subscription");
+  const showRooms =
+    filterTypes.length === 0 || filterTypes.includes("room");
+
+  const filteredSubscriptions = useMemo(() => {
+    if (!showSubscriptions) return [];
+
+    const q = debouncedFilter.trim().toLowerCase();
+    const categorySet = new Set<ServiceCategory>(filterCategories);
+
+    let list = items.slice();
+
+    // 1) text search across name, tag, note
+    if (q) {
+      list = list.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          (s.tag ?? "").toLowerCase().includes(q) ||
+          (s.note ?? "").toLowerCase().includes(q),
+      );
+    }
+
+    // 2) category — we reuse the `tag` field on Subscription which is
+    //    populated with ServiceCategory when picked from the catalog.
+    if (categorySet.size > 0) {
+      list = list.filter((s) => s.tag && categorySet.has(s.tag as ServiceCategory));
+    }
+
+    // 3) sort
+    switch (sortBy) {
+      case "priceDesc":
+        list.sort((a, b) => b.amount - a.amount);
+        break;
+      case "priceAsc":
+        list.sort((a, b) => a.amount - b.amount);
+        break;
+      case "alphabetical":
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "nextPayment":
+      default:
+        list.sort(
+          (a, b) =>
+            new Date(a.next_payment_at).getTime() -
+            new Date(b.next_payment_at).getTime(),
+        );
+        break;
+    }
+    return list;
+  }, [items, debouncedFilter, filterCategories, sortBy, showSubscriptions]);
 
   const totalMonthly = useMemo(
     () =>
@@ -190,34 +250,42 @@ export function Dashboard({ partnerOffers, user }: Props) {
             <DashboardSkeleton />
           ) : (
             <>
-              <SharedRooms
-                rooms={rooms}
-                onViewAll={handleViewAllRooms}
-                onOpen={handleOpenRoom}
-                onCreateRoom={handleCreateRoom}
-              />
+              {showRooms && (
+                <SharedRooms
+                  rooms={rooms}
+                  onViewAll={handleViewAllRooms}
+                  onOpen={handleOpenRoom}
+                  onCreateRoom={handleCreateRoom}
+                />
+              )}
               {items.length === 0 ? (
                 <EmptyDashboard onAdd={openAdd} />
               ) : (
                 <>
                   <div className="mt-2">
-                    <FilterBar value={filter} onChange={setFilter} />
+                    <FilterBar
+                      value={filter}
+                      onChange={setFilter}
+                      onOpenFilters={() => setFilterSheetOpen(true)}
+                    />
                   </div>
-                  <div className="mt-5 space-y-2 px-5">
-                    {filtered.map((s) => (
-                      <SwipeableSubscriptionCard
-                        key={s.id}
-                        subscription={s}
-                        onClick={openEdit}
-                        onDelete={handleDelete}
-                      />
-                    ))}
-                    {filtered.length === 0 && (
-                      <p className="py-10 text-center text-sm text-muted-foreground">
-                        {t("dashboard.noResults")}
-                      </p>
-                    )}
-                  </div>
+                  {showSubscriptions && (
+                    <div className="mt-5 space-y-2 px-5">
+                      {filteredSubscriptions.map((s) => (
+                        <SwipeableSubscriptionCard
+                          key={s.id}
+                          subscription={s}
+                          onClick={openEdit}
+                          onDelete={handleDelete}
+                        />
+                      ))}
+                      {filteredSubscriptions.length === 0 && (
+                        <p className="py-10 text-center text-sm text-muted-foreground">
+                          {t("dashboard.noResults")}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {settings.cpaActive && (
                     <div className="mt-8">
                       <PartnerOffers offers={partnerOffers} />
@@ -277,6 +345,11 @@ export function Dashboard({ partnerOffers, user }: Props) {
         <CreateRoomSheet
           open={createRoomOpen}
           onOpenChange={setCreateRoomOpen}
+        />
+
+        <FilterSheet
+          open={filterSheetOpen}
+          onOpenChange={setFilterSheetOpen}
         />
       </div>
     </>
