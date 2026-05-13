@@ -1,10 +1,10 @@
 import { useState, useCallback } from "react";
-import { Trash2 } from "lucide-react";
-import type { Subscription } from "@/types/subscription";
-import { SubscriptionCard } from "./SubscriptionCard";
+import { Trash2, Users } from "lucide-react";
 import { hapticImpact } from "@/lib/telegram";
 import { useTranslation } from "react-i18next";
 import { useSwipeGesture, SPRING_TRANSITION } from "@/hooks/useSwipeGesture";
+import { ServiceLogo } from "./ServiceLogo";
+import { formatCurrency, localeFor } from "@/lib/format";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,15 +15,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import type { RoomSummary } from "@/types/room";
 
 interface Props {
-  subscription: Subscription;
-  onClick?: (s: Subscription) => void;
+  room: RoomSummary;
+  /** Formatted display amount in user's currency */
+  displayAmount: number;
+  /** User's preferred currency code */
+  userCurrency: string;
+  onClick?: (id: string) => void;
   onDelete?: (id: string) => void;
 }
 
-export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: Props) {
-  const { t } = useTranslation();
+export function SwipeableRoomCard({ room, displayAmount, userCurrency, onClick, onDelete }: Props) {
+  const { t, i18n } = useTranslation();
+  const lc = localeFor(i18n.language);
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -40,31 +46,29 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
     setDeleting(true);
     hapticImpact("medium");
     setTimeout(() => {
-      onDelete?.(subscription.id);
+      onDelete?.(room.id);
     }, 300);
-  }, [onDelete, subscription.id, deleting]);
+  }, [onDelete, room.id, deleting]);
 
   const handleCancelDelete = useCallback(() => {
     setConfirmOpen(false);
     swipe.close();
   }, [swipe]);
 
-  const handleCardClick = useCallback(
-    (s: Subscription) => {
-      if (swipe.isOpen) {
-        swipe.close();
-        return;
-      }
-      onClick?.(s);
-    },
-    [swipe, onClick],
-  );
+  const handleCardClick = useCallback(() => {
+    if (swipe.isOpen) {
+      swipe.close();
+      return;
+    }
+    hapticImpact("light");
+    onClick?.(room.id);
+  }, [swipe, onClick, room.id]);
 
   return (
     <>
       <div
-        className={`relative overflow-hidden rounded-2xl transition-all ${
-          deleting ? "max-h-0 opacity-0 mb-0" : "max-h-24 opacity-100"
+        className={`relative overflow-hidden rounded-xl transition-all ${
+          deleting ? "max-h-0 opacity-0 mb-0" : "max-h-28 opacity-100"
         }`}
         style={{
           transitionDuration: deleting ? "300ms" : "0ms",
@@ -72,11 +76,11 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
         }}
       >
         {/* Delete background */}
-        <div className="absolute inset-0 flex items-center justify-end rounded-2xl bg-destructive">
+        <div className="absolute inset-0 flex items-center justify-end rounded-xl bg-destructive">
           <button
             onClick={handleDeleteTap}
             className="flex h-full w-20 items-center justify-center text-white transition-transform active:scale-90"
-            aria-label="Delete"
+            aria-label={`Delete room ${room.name}`}
           >
             <Trash2 className="h-5 w-5" />
           </button>
@@ -95,18 +99,45 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
           onTouchEnd={swipe.onTouchEnd}
           onMouseDown={swipe.onMouseDown}
         >
-          <SubscriptionCard subscription={subscription} onClick={handleCardClick} />
+          <button
+            onClick={handleCardClick}
+            className="bg-surface hover:bg-surface-elevated flex w-full items-center justify-between rounded-xl border border-white/10 p-4 text-left transition-colors"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-bold">{room.name}</p>
+              <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Users className="h-3 w-3" />
+                <span>{t("dashboard.members", { count: room.members })}</span>
+                <span className="opacity-50">•</span>
+                <span className="font-medium text-foreground">
+                  {formatCurrency(displayAmount, userCurrency, lc)} {t("dashboard.perMonth")}
+                </span>
+              </div>
+            </div>
+            <div className="ml-3 flex -space-x-1.5">
+              {room.services.slice(0, 4).map((s, i) => (
+                <ServiceLogo
+                  key={i}
+                  brand={s.brand}
+                  name={s.brand}
+                  size={24}
+                  rounded="full"
+                  className="border border-background"
+                />
+              ))}
+            </div>
+          </button>
         </div>
       </div>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="rounded-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t("card.deleteConfirmTitle")}
+              {t("room.deleteRoomConfirmTitle")}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t("card.deleteConfirmDesc", { name: subscription.name })}
+              {t("room.deleteRoomConfirmDesc", { name: room.name })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -117,7 +148,7 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
               onClick={handleConfirmDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {t("card.delete")}
+              {t("room.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
