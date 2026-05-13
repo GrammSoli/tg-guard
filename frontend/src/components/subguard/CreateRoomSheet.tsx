@@ -14,6 +14,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -38,6 +48,7 @@ interface Props {
 }
 
 interface PickedService {
+  _tempId: string;
   brand: string;
   logoUrl: string;
   name: string;
@@ -71,6 +82,10 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
   const [customIconName, setCustomIconName] = useState("credit-card");
   const [customIconColor, setCustomIconColor] = useState("blue");
 
+  // Duplicate brand dialog state
+  const [pendingDupService, setPendingDupService] = useState<(typeof POPULAR_SERVICES)[number] | null>(null);
+  const [pendingNote, setPendingNote] = useState("");
+
   // Adopt the settings currency only while the user hasn't edited the field
   // themselves. Once they touch the select we treat their value as canonical.
   useEffect(() => {
@@ -93,10 +108,10 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
   const debouncedServiceSearch = useDebouncedValue(serviceSearch, 300);
   const isSearchPending = serviceSearch !== debouncedServiceSearch;
 
-  // Available services (not yet picked)
+  // Available services — show ALL, allow duplicates
   const availableServices = useMemo(
-    () => POPULAR_SERVICES.filter((p) => !services.some((s) => s.brand === p.brand)),
-    [services],
+    () => POPULAR_SERVICES.filter((p) => p.logoUrl),
+    [],
   );
 
   // Filtered by search query
@@ -106,28 +121,44 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
     return availableServices.filter((p) => p.name.toLowerCase().includes(q));
   }, [debouncedServiceSearch, availableServices]);
 
-  const addService = (p: (typeof POPULAR_SERVICES)[number]) => {
+  const addService = (p: (typeof POPULAR_SERVICES)[number], note?: string) => {
     setServices((prev) => [
       ...prev,
       {
+        _tempId: crypto.randomUUID(),
         brand: p.brand,
         logoUrl: p.logoUrl!,
         name: p.name,
         amount: p.defaultAmount,
         currency: p.defaultCurrency,
+        note,
       },
     ]);
   };
 
-  const removeService = (idx: number) => {
-    setServices((prev) => prev.filter((_, i) => i !== idx));
+  const removeService = (tempId: string) => {
+    setServices((prev) => prev.filter((s) => s._tempId !== tempId));
   };
+
+  const handleServiceClick = (p: (typeof POPULAR_SERVICES)[number]) => {
+    const isDuplicate = services.some((s) => s.brand === p.brand);
+    if (isDuplicate) {
+      setPendingDupService(p);
+      setPendingNote("");
+    } else {
+      addService(p);
+    }
+  };
+
+
+
 
   const addCustomService = () => {
     if (!customName.trim() || !customAmount) return;
     setServices((prev) => [
       ...prev,
       {
+        _tempId: crypto.randomUUID(),
         brand: "default",
         logoUrl: "",
         name: customName.trim(),
@@ -190,6 +221,7 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
   );
 
   return (
+    <>
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="bg-background border-border">
         <div className="mx-auto w-full max-w-md">
@@ -244,9 +276,9 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                   {t("createRoom.selected", { count: services.length })}
                 </p>
                 <div className="space-y-2">
-                {services.map((s, idx) => (
+                {services.map((s) => (
                     <div
-                      key={`${s.brand}-${idx}`}
+                      key={s._tempId}
                       className="bg-surface flex items-center gap-3 rounded-2xl p-3"
                     >
                       {s.brand === "default" && s.icon_name && s.icon_color ? (
@@ -266,7 +298,7 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                         </p>
                       </div>
                       <button
-                        onClick={() => removeService(idx)}
+                        onClick={() => removeService(s._tempId)}
                         className="bg-surface-elevated flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/20 hover:text-destructive"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -405,7 +437,7 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                       {filteredAvailable.map((p, i) => (
                         <button
                           key={p.id}
-                          onClick={() => addService(p)}
+                          onClick={() => handleServiceClick(p)}
                           className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
                           style={{ animationDelay: `${i * 30}ms`, animationFillMode: "backwards" }}
                         >
@@ -443,5 +475,45 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
         </div>
       </DrawerContent>
     </Drawer>
+
+    {/* Duplicate brand — require Note */}
+    <AlertDialog
+      open={!!pendingDupService}
+      onOpenChange={(o) => !o && setPendingDupService(null)}
+    >
+      <AlertDialogContent className="rounded-2xl">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{pendingDupService?.name}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("room.noteRequired")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <input
+          type="text"
+          placeholder={t("room.noteRequiredPh")}
+          value={pendingNote}
+          onChange={(e) => setPendingNote(e.target.value)}
+          className="w-full rounded-xl border border-white/10 bg-surface-elevated px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+          autoFocus
+        />
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("room.cancel")}</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={!pendingNote.trim()}
+            className="bg-gradient-primary text-white disabled:opacity-50"
+            onClick={() => {
+              if (pendingDupService && pendingNote.trim()) {
+                addService(pendingDupService, pendingNote.trim());
+                setPendingDupService(null);
+                setPendingNote("");
+              }
+            }}
+          >
+            {t("room.addService")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
