@@ -146,7 +146,7 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
         <div className="grid grid-cols-7">
           {cells.map((d, i) => {
             if (d === null) {
-              return <div key={i} className="h-[2.75rem]" />;
+              return <div key={i} className="h-14" />;
             }
             const dateObj = new Date(year, month, d);
             const isToday = sameDay(dateObj, today);
@@ -156,10 +156,10 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
               <button
                 key={i}
                 onClick={() => setSelectedDate(isSelected ? null : dateObj)}
-                className="relative h-[2.75rem] w-full overflow-visible bg-transparent p-0"
+                className="h-14 w-full p-0 flex flex-col items-center justify-start bg-transparent"
               >
                 <span
-                  className={`absolute left-1/2 top-0 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full text-sm transition-all ${
+                  className={`w-8 h-8 flex-none flex items-center justify-center rounded-full mt-1 text-sm transition-all ${
                     isSelected
                       ? "bg-gradient-primary font-bold text-white shadow-elevated"
                       : isToday
@@ -171,26 +171,19 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
                 >
                   {d}
                 </span>
-                {dayBills.length > 0 && (
-                  <div className="absolute left-1/2 top-[34px] flex -translate-x-1/2 items-center justify-center">
-                    {dayBills.slice(0, CALENDAR_ICON_LIMIT).map((s, idx) => (
-                      <span
-                        key={s.id}
-                        className={idx > 0 ? "-ml-1" : ""}
-                      >
-                        <MiniSubIcon sub={s} />
-                      </span>
-                    ))}
-                    {dayBills.length > CALENDAR_ICON_LIMIT && (
-                      <span
-                        aria-hidden="true"
-                        className="bg-muted text-muted-foreground ring-2 ring-background -ml-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[8px] font-bold leading-none"
-                      >
-                        +{dayBills.length - CALENDAR_ICON_LIMIT}
-                      </span>
-                    )}
-                  </div>
-                )}
+                <div className="h-4 flex-none mt-0.5 flex flex-row items-center justify-center -space-x-1">
+                  {dayBills.slice(0, CALENDAR_ICON_LIMIT).map((s) => (
+                    <MiniSubIcon key={s.id} sub={s} />
+                  ))}
+                  {dayBills.length > CALENDAR_ICON_LIMIT && (
+                    <span
+                      aria-hidden="true"
+                      className="bg-muted text-muted-foreground ring-2 ring-background flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[8px] font-bold leading-none"
+                    >
+                      +{dayBills.length - CALENDAR_ICON_LIMIT}
+                    </span>
+                  )}
+                </div>
               </button>
             );
           })}
