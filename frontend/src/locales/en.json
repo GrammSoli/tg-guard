@@ -233,6 +233,7 @@
   "privacy.deleteFailed": "Couldn't delete account: {{reason}}",
   "modal.note": "Note (optional)",
   "modal.notePh": "e.g. for family",
+  "modal.appearance": "Appearance",
   "category.all": "All",
   "category.entertainment": "Entertainment",
   "category.music": "Music",

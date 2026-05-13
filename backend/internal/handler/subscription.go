@@ -54,6 +54,8 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 		Brand         string  `json:"brand"`
 		Tag           string  `json:"tag"`
 		Note          string  `json:"note"`
+		IconName      string  `json:"icon_name"`
+		IconColor     string  `json:"icon_color"`
 		Amount        float64 `json:"amount"`
 		Currency      string  `json:"currency"`
 		Period        string  `json:"period"`
@@ -84,6 +86,8 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 		Brand:         defaultStr(body.Brand, "default"),
 		Tag:           body.Tag,
 		Note:          body.Note,
+		IconName:      body.IconName,
+		IconColor:     body.IconColor,
 		Amount:        body.Amount,
 		Currency:      defaultStr(body.Currency, "USD"),
 		Period:        defaultStr(body.Period, "monthly"),
@@ -142,6 +146,12 @@ func (h *SubscriptionHandler) Update(c fiber.Ctx) error {
 	}
 	if v, ok := body["note"].(string); ok {
 		sub.Note = v
+	}
+	if v, ok := body["icon_name"].(string); ok {
+		sub.IconName = v
+	}
+	if v, ok := body["icon_color"].(string); ok {
+		sub.IconColor = v
 	}
 	if v, ok := body["amount"].(float64); ok {
 		sub.Amount = v
