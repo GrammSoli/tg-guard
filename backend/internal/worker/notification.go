@@ -33,10 +33,14 @@ const notificationTickInterval = 30 * time.Minute
 // per renewal date even if the worker scans every 30 minutes.
 const notificationDedupWindow = 20 * time.Hour
 
-// renewCallbackPrefix is the CallbackData prefix written into the inline
-// "Renew" button. The bot dispatches on this prefix. Format is
-// "renew_sub_<uuid>", 46 bytes — well under Telegram's 64-byte limit.
-const renewCallbackPrefix = "renew_sub_"
+// renewCallbackPrefix / cancelCallbackPrefix are the CallbackData prefixes
+// written into the inline keyboard attached to every reminder. The bot
+// dispatches on these prefixes. Both formats are "<prefix><uuid>", 46/47
+// bytes — well under Telegram's 64-byte limit.
+const (
+	renewCallbackPrefix  = "renew_sub_"
+	cancelCallbackPrefix = "cancel_sub_"
+)
 
 // Start launches the notification check loop every 30 minutes.
 func (w *NotificationWorker) Start(ctx context.Context) {
@@ -163,10 +167,15 @@ func shouldSendNow(sub *model.Subscription, u *model.User, now time.Time) bool {
 	return true
 }
 
-// renewKeyboard builds the single-button inline keyboard that ships with
-// every renewal reminder. Clicking it fires a CallbackQuery handled by
-// internal/bot/bot.go, which advances NextPaymentAt by the subscription's
-// period and clears notified_at.
+// renewKeyboard builds the two-button inline keyboard that ships with
+// every renewal reminder. Clicking either button fires a CallbackQuery
+// handled by internal/bot/bot.go:
+//
+//	"Paid (Renew)"  → advance NextPaymentAt by Period + clear notified_at
+//	"Cancelled"     → delete the subscription row
+//
+// Both buttons live on the same row so the user picks one in a single
+// glance instead of scrolling through a vertical menu.
 func renewKeyboard(sub *model.Subscription, locale string) *models.InlineKeyboardMarkup {
 	return &models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{{
@@ -174,15 +183,26 @@ func renewKeyboard(sub *model.Subscription, locale string) *models.InlineKeyboar
 				Text:         renewButtonLabel(locale),
 				CallbackData: renewCallbackPrefix + sub.ID.String(),
 			},
+			{
+				Text:         cancelButtonLabel(locale),
+				CallbackData: cancelCallbackPrefix + sub.ID.String(),
+			},
 		}},
 	}
 }
 
 func renewButtonLabel(locale string) string {
 	if locale == "ru" {
-		return "✅ Оплачено (Продлить)"
+		return "✅ Оплачено"
 	}
-	return "✅ Paid (Renew)"
+	return "✅ Paid"
+}
+
+func cancelButtonLabel(locale string) string {
+	if locale == "ru" {
+		return "❌ Отменил"
+	}
+	return "❌ Cancelled"
 }
 
 // buildReminderText assembles the renewal-reminder Telegram message,
