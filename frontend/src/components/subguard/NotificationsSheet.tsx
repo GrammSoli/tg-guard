@@ -39,34 +39,34 @@ const TIME_OPTIONS = [
   "21:00",
 ];
 
-const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
-  { value: "Pacific/Honolulu", label: "Гонолулу (UTC-10)" },
-  { value: "America/Anchorage", label: "Аляска (UTC-9)" },
-  { value: "America/Los_Angeles", label: "Лос-Анджелес (UTC-8)" },
-  { value: "America/Denver", label: "Денвер (UTC-7)" },
-  { value: "America/Chicago", label: "Чикаго (UTC-6)" },
-  { value: "America/New_York", label: "Нью-Йорк (UTC-5)" },
-  { value: "America/Sao_Paulo", label: "Сан-Паулу (UTC-3)" },
-  { value: "Atlantic/Reykjavik", label: "Рейкьявик (UTC+0)" },
-  { value: "Europe/London", label: "Лондон (UTC+0/+1)" },
-  { value: "Europe/Berlin", label: "Берлин (UTC+1/+2)" },
-  { value: "Europe/Istanbul", label: "Стамбул (UTC+3)" },
-  { value: "Europe/Moscow", label: "Москва (UTC+3)" },
-  { value: "Europe/Samara", label: "Самара (UTC+4)" },
-  { value: "Asia/Tbilisi", label: "Тбилиси (UTC+4)" },
-  { value: "Asia/Dubai", label: "Дубай (UTC+4)" },
-  { value: "Asia/Yekaterinburg", label: "Екатеринбург (UTC+5)" },
-  { value: "Asia/Tashkent", label: "Ташкент (UTC+5)" },
-  { value: "Asia/Almaty", label: "Алматы (UTC+6)" },
-  { value: "Asia/Novosibirsk", label: "Новосибирск (UTC+7)" },
-  { value: "Asia/Bangkok", label: "Бангкок (UTC+7)" },
-  { value: "Asia/Irkutsk", label: "Иркутск (UTC+8)" },
-  { value: "Asia/Shanghai", label: "Шанхай (UTC+8)" },
-  { value: "Asia/Tokyo", label: "Токио (UTC+9)" },
-  { value: "Asia/Vladivostok", label: "Владивосток (UTC+10)" },
-  { value: "Asia/Kamchatka", label: "Камчатка (UTC+12)" },
-  { value: "Australia/Sydney", label: "Сидней (UTC+10/+11)" },
-  { value: "Pacific/Auckland", label: "Окленд (UTC+12/+13)" },
+const TIMEZONE_OPTIONS: { value: string; ru: string; en: string }[] = [
+  { value: "Pacific/Honolulu", ru: "Гонолулу (UTC-10)", en: "Honolulu (UTC-10)" },
+  { value: "America/Anchorage", ru: "Аляска (UTC-9)", en: "Alaska (UTC-9)" },
+  { value: "America/Los_Angeles", ru: "Лос-Анджелес (UTC-8)", en: "Los Angeles (UTC-8)" },
+  { value: "America/Denver", ru: "Денвер (UTC-7)", en: "Denver (UTC-7)" },
+  { value: "America/Chicago", ru: "Чикаго (UTC-6)", en: "Chicago (UTC-6)" },
+  { value: "America/New_York", ru: "Нью-Йорк (UTC-5)", en: "New York (UTC-5)" },
+  { value: "America/Sao_Paulo", ru: "Сан-Паулу (UTC-3)", en: "São Paulo (UTC-3)" },
+  { value: "Atlantic/Reykjavik", ru: "Рейкьявик (UTC+0)", en: "Reykjavik (UTC+0)" },
+  { value: "Europe/London", ru: "Лондон (UTC+0/+1)", en: "London (UTC+0/+1)" },
+  { value: "Europe/Berlin", ru: "Берлин (UTC+1/+2)", en: "Berlin (UTC+1/+2)" },
+  { value: "Europe/Istanbul", ru: "Стамбул (UTC+3)", en: "Istanbul (UTC+3)" },
+  { value: "Europe/Moscow", ru: "Москва (UTC+3)", en: "Moscow (UTC+3)" },
+  { value: "Europe/Samara", ru: "Самара (UTC+4)", en: "Samara (UTC+4)" },
+  { value: "Asia/Tbilisi", ru: "Тбилиси (UTC+4)", en: "Tbilisi (UTC+4)" },
+  { value: "Asia/Dubai", ru: "Дубай (UTC+4)", en: "Dubai (UTC+4)" },
+  { value: "Asia/Yekaterinburg", ru: "Екатеринбург (UTC+5)", en: "Yekaterinburg (UTC+5)" },
+  { value: "Asia/Tashkent", ru: "Ташкент (UTC+5)", en: "Tashkent (UTC+5)" },
+  { value: "Asia/Almaty", ru: "Алматы (UTC+6)", en: "Almaty (UTC+6)" },
+  { value: "Asia/Novosibirsk", ru: "Новосибирск (UTC+7)", en: "Novosibirsk (UTC+7)" },
+  { value: "Asia/Bangkok", ru: "Бангкок (UTC+7)", en: "Bangkok (UTC+7)" },
+  { value: "Asia/Irkutsk", ru: "Иркутск (UTC+8)", en: "Irkutsk (UTC+8)" },
+  { value: "Asia/Shanghai", ru: "Шанхай (UTC+8)", en: "Shanghai (UTC+8)" },
+  { value: "Asia/Tokyo", ru: "Токио (UTC+9)", en: "Tokyo (UTC+9)" },
+  { value: "Asia/Vladivostok", ru: "Владивосток (UTC+10)", en: "Vladivostok (UTC+10)" },
+  { value: "Asia/Kamchatka", ru: "Камчатка (UTC+12)", en: "Kamchatka (UTC+12)" },
+  { value: "Australia/Sydney", ru: "Сидней (UTC+10/+11)", en: "Sydney (UTC+10/+11)" },
+  { value: "Pacific/Auckland", ru: "Окленд (UTC+12/+13)", en: "Auckland (UTC+12/+13)" },
 ];
 
 function detectBrowserTimezone(): string {
@@ -88,7 +88,7 @@ function detectBrowserTimezone(): string {
  * morning, not server-UTC morning.
  */
 export function NotificationsSheet({ open, onOpenChange }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const notificationsEnabled = useSettingsStore(
     (s) => s.settings.notificationsEnabled,
   );
@@ -240,10 +240,10 @@ export function NotificationsSheet({ open, onOpenChange }: Props) {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold">
-                  {t("notifications.timezoneLabel", "Часовой пояс")}
+                  {t("notifications.timezoneLabel")}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
-                  {t("notifications.timezoneHint", "Уведомления приходят по вашему времени")}
+                  {t("notifications.timezoneHint")}
                 </p>
               </div>
               <Select
@@ -257,7 +257,7 @@ export function NotificationsSheet({ open, onOpenChange }: Props) {
                 <SelectContent className="max-h-60">
                   {TIMEZONE_OPTIONS.map((tz) => (
                     <SelectItem key={tz.value} value={tz.value}>
-                      {tz.label}
+                      {i18n.language === "ru" ? tz.ru : tz.en}
                     </SelectItem>
                   ))}
                 </SelectContent>
