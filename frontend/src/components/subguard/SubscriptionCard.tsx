@@ -40,7 +40,14 @@ export function SubscriptionCard({ subscription, onClick }: Props) {
       <BrandIcon brand={s.brand} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="truncate text-[15px] font-semibold">{s.name}</p>
+          <p className="truncate text-[15px] font-semibold">
+            {s.name}
+            {s.note && (
+              <span className="ml-1 font-normal text-muted-foreground">
+                · {s.note}
+              </span>
+            )}
+          </p>
           {s.is_trial && (
             <span className="bg-trial text-trial-foreground rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide">
               {t("card.trial")}

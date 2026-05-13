@@ -9,6 +9,7 @@ import { Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { ServiceLogo } from "./ServiceLogo";
+import { categoryKey } from "@/lib/categoryKey";
 
 interface Props {
   onSelect: (service: PopularService) => void;
@@ -59,7 +60,7 @@ export function ServiceCatalog({ onSelect, onCustom }: Props) {
                     : "bg-surface text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {c}
+                {t(categoryKey(c))}
               </button>
             );
           })}
