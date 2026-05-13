@@ -193,19 +193,24 @@ func handleRenewCallback(ctx context.Context, b *tgbot.Bot, update *models.Updat
 	next := advancePayment(prev, sub.Period)
 
 	// Persist: new payment date + clear notified_at so the worker can
-	// fire again before the *next* renewal. Both in one Updates() so we
-	// don't half-update on failure.
+	// fire again before the *next* renewal. If this was a trial, convert
+	// it to a regular paid subscription.
+	updates := map[string]interface{}{
+		"next_payment_at": next,
+		"notified_at":     nil,
+	}
+	if sub.IsTrial {
+		updates["is_trial"] = false
+	}
 	if err := db.WithContext(ctx).Model(&model.Subscription{}).
 		Where("id = ?", sub.ID).
-		Updates(map[string]interface{}{
-			"next_payment_at": next,
-			"notified_at":     nil,
-		}).Error; err != nil {
+		Updates(updates).Error; err != nil {
 		log.Printf("[bot.renew] update error: %v", err)
 		answerAndLog("save failed")
 		return
 	}
 	sub.NextPaymentAt = next
+	sub.IsTrial = false
 
 	answerAndLog(renewToastLabel(owner.Locale))
 
@@ -290,7 +295,12 @@ func handleCancelCallback(ctx context.Context, b *tgbot.Bot, update *models.Upda
 	answerAndLog(cancelToastLabel(owner.Locale))
 
 	if cb.Message.Message != nil {
-		newText := cancelConfirmationText(&sub, owner.Locale)
+		var newText string
+		if sub.IsTrial {
+			newText = cancelConfirmationTextForTrial(&sub, owner.Locale)
+		} else {
+			newText = cancelConfirmationText(&sub, owner.Locale)
+		}
 		if _, err := b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
 			ChatID:    cb.Message.Message.Chat.ID,
 			MessageID: cb.Message.Message.ID,
@@ -350,6 +360,14 @@ func renewConfirmationText(sub *model.Subscription, locale string) string {
 	}
 	return fmt.Sprintf("✅ Subscription *%s* paid. Next payment: %s.",
 		escapeMarkdownLite(sub.Name), dateStr)
+}
+
+func cancelConfirmationTextForTrial(sub *model.Subscription, locale string) string {
+	name := escapeMarkdownLite(sub.Name)
+	if locale == "ru" {
+		return fmt.Sprintf("🗑 Пробный период *%s* отменён.", name)
+	}
+	return fmt.Sprintf("🗑 Trial for *%s* cancelled.", name)
 }
 
 // escapeMarkdownLite delegates to the shared tgutil package.
