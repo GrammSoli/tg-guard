@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Pencil } from "lucide-react";
 import { categoryKey } from "@/lib/categoryKey";
 import { DEFAULT_ICON_COLOR, DEFAULT_ICON_NAME } from "@/lib/customIcons";
 import { IconPicker } from "./IconPicker";
@@ -162,45 +163,70 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
           ) : (
           <>
           <div className="space-y-4 px-5 pb-2">
-            <button
-              type="button"
-              onClick={() => setStep("catalog")}
-              className="bg-surface flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-transform active:scale-[0.99]"
-            >
-              <BrandIcon brand={brand} iconName={iconName} iconColor={iconColor} />
-              <div className="flex-1">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {t("modal.selectedService")}
-                </p>
-                <p className="text-sm font-semibold">
-                  {name || t("modal.selectService")}
-                </p>
-              </div>
-              <span className="text-primary inline-flex items-center gap-1 text-xs font-semibold">
-                {t("modal.changeService")}
-                <ChevronRight className="h-4 w-4" />
-              </span>
-            </button>
+            <div className="bg-surface flex items-center gap-3 rounded-2xl p-3">
+              {brand === "default" ? (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={t("modal.editIcon")}
+                      className="group relative shrink-0 rounded-2xl transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                      <BrandIcon brand={brand} iconName={iconName} iconColor={iconColor} />
+                      {/* Pencil badge — small, sits just outside the avatar in the
+                          bottom-right. Border-2 in the surface colour creates a
+                          clean cut-out look against the avatar tint. */}
+                      <span className="bg-foreground text-background border-surface absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 shadow transition-transform group-hover:scale-110">
+                        <Pencil className="h-2.5 w-2.5" />
+                      </span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="start"
+                    side="bottom"
+                    className="w-72 p-3"
+                  >
+                    <IconPicker
+                      iconName={iconName}
+                      iconColor={iconColor}
+                      onChange={({ iconName: n, iconColor: c }) => {
+                        setIconName(n);
+                        setIconColor(c);
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+              ) : (
+                <BrandIcon brand={brand} iconName={iconName} iconColor={iconColor} />
+              )}
+              <button
+                type="button"
+                onClick={() => setStep("catalog")}
+                className="flex flex-1 items-center text-left transition-transform active:scale-[0.99]"
+              >
+                <div className="flex-1">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t("modal.selectedService")}
+                  </p>
+                  <p className="text-sm font-semibold">
+                    {name || t("modal.selectService")}
+                  </p>
+                </div>
+                <span className="text-primary inline-flex items-center gap-1 text-xs font-semibold">
+                  {t("modal.changeService")}
+                  <ChevronRight className="h-4 w-4" />
+                </span>
+              </button>
+            </div>
 
             {brand === "default" && (
-              <>
-                <Field label={t("modal.customName")}>
-                  <Input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder={t("modal.serviceNamePh")}
-                  />
-                </Field>
-
-                <IconPicker
-                  iconName={iconName}
-                  iconColor={iconColor}
-                  onChange={({ iconName: n, iconColor: c }) => {
-                    setIconName(n);
-                    setIconColor(c);
-                  }}
+              <Field label={t("modal.customName")}>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={t("modal.serviceNamePh")}
                 />
-              </>
+              </Field>
             )}
 
             <div className="grid grid-cols-3 gap-3">
