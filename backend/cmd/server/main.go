@@ -108,30 +108,39 @@ func main() {
 	}
 	log.Println("redis connected")
 
+	// ── Notifier (real TG or mock for tests) ─────────
+	// In production the real TelegramNotifier is injected after bot.Setup
+	// (which needs the worker, which needs the notifier — circular). We
+	// start with nil and call SetNotifier once the bot instance exists.
+	var n notifier.Notifier
+	if isTestMode {
+		n = notifier.NewMockNotifier()
+		log.Println("using MockNotifier (test mode)")
+	}
+
+	// ── Notification Worker (created early so bot.Setup can reference it) ──
+	notifWorker := worker.NewNotificationWorker(db, n)
+
 	// ── Telegram Bot ───────────────────────────────────
 	var tgBot *tgbot.Bot
 	if !isTestMode {
 		if cfg.WebhookSecret == "" {
 			log.Fatal("WEBHOOK_SECRET is required in production")
 		}
-		tgBot, err = bot.Setup(cfg, db)
+		tgBot, err = bot.Setup(cfg, db, notifWorker)
 		if err != nil {
 			log.Fatalf("bot setup error: %v", err)
 		}
+
+		// Now that the bot is ready, create the real notifier and inject it.
+		n = notifier.NewTelegramNotifier(tgBot)
+		notifWorker.SetNotifier(n)
+
 		if err := bot.SetWebhook(tgBot, cfg); err != nil {
 			log.Printf("webhook setup warning: %v", err)
 		}
 	} else {
 		log.Println("skipping Telegram Bot setup (test mode)")
-	}
-
-	// ── Notifier (real TG or mock for tests) ─────────
-	var n notifier.Notifier
-	if isTestMode {
-		n = notifier.NewMockNotifier()
-		log.Println("using MockNotifier (test mode)")
-	} else {
-		n = notifier.NewTelegramNotifier(tgBot)
 	}
 
 	// ── Workers (background goroutines) ────────────────
@@ -141,7 +150,6 @@ func main() {
 	currencyWorker := worker.NewCurrencyWorker(rdb)
 	go currencyWorker.Start(ctx)
 
-	notifWorker := worker.NewNotificationWorker(db, n)
 	go notifWorker.Start(ctx)
 
 	billingWorker := worker.NewBillingResetWorker(db)

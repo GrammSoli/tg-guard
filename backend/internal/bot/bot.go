@@ -16,6 +16,7 @@ import (
 	"github.com/subguard/backend/internal/config"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/repository"
+	"github.com/subguard/backend/internal/worker"
 )
 
 // renewCallbackPrefix / cancelCallbackPrefix are the CallbackData prefixes
@@ -29,7 +30,7 @@ const (
 )
 
 // Setup initializes the Telegram bot with handlers and returns the bot instance.
-func Setup(cfg *config.Config, db *gorm.DB) (*tgbot.Bot, error) {
+func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWorker) (*tgbot.Bot, error) {
 	adminRepo := repository.NewAdminRepo(db)
 
 	opts := []tgbot.Option{
@@ -60,6 +61,14 @@ func Setup(cfg *config.Config, db *gorm.DB) (*tgbot.Bot, error) {
 	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, cancelCallbackPrefix, tgbot.MatchTypePrefix,
 		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
 			handleCancelCallback(ctx, b, update, db)
+		},
+	)
+
+	// /force_notify — admin-only test command that runs the notification
+	// worker for the calling admin, ignoring time checks and dedup.
+	b.RegisterHandler(tgbot.HandlerTypeMessageText, "/force_notify", tgbot.MatchTypeExact,
+		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
+			handleForceNotify(ctx, b, update, cfg, db, notifWorker)
 		},
 	)
 
@@ -362,6 +371,59 @@ var markdownLiteReplacer = strings.NewReplacer(
 
 func escapeMarkdownLite(s string) string {
 	return markdownLiteReplacer.Replace(s)
+}
+
+// handleForceNotify is an admin-only test command that forces the notification
+// worker to run for the calling admin user, ignoring NotificationTime and
+// the notified_at dedup window. This lets the admin test push delivery any
+// time of day, as many times as needed.
+func handleForceNotify(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWorker) {
+	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+	tgUser := update.Message.From
+
+	// Admin gate — only admin Telegram IDs can use this command.
+	if !cfg.IsAdmin(tgUser.ID) {
+		b.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "⛔ This command is admin-only.",
+		})
+		return
+	}
+
+	// Find the admin's internal user record.
+	var user model.User
+	if err := db.WithContext(ctx).Where("telegram_id = ?", tgUser.ID).First(&user).Error; err != nil {
+		log.Printf("[bot.force_notify] user lookup error: %v", err)
+		b.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "❌ Failed to look up your user record.",
+		})
+		return
+	}
+
+	b.SendMessage(ctx, &tgbot.SendMessageParams{
+		ChatID: chatID,
+		Text:   "🔧 Running test notification pass…",
+	})
+
+	sent, total, err := notifWorker.ForceNotifyUser(ctx, user.ID)
+	if err != nil {
+		log.Printf("[bot.force_notify] error: %v", err)
+		b.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID: chatID,
+			Text:   fmt.Sprintf("❌ Error: %v", err),
+		})
+		return
+	}
+
+	b.SendMessage(ctx, &tgbot.SendMessageParams{
+		ChatID: chatID,
+		Text:   fmt.Sprintf("🔧 Тестовый прогон воркера завершен.\nПодписок на завтра: %d\nОтправлено: %d", total, sent),
+	})
 }
 
 // SetWebhook registers the webhook URL with Telegram.

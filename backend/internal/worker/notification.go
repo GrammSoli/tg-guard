@@ -24,6 +24,13 @@ func NewNotificationWorker(db *gorm.DB, n notifier.Notifier) *NotificationWorker
 	return &NotificationWorker{db: db, notifier: n}
 }
 
+// SetNotifier replaces the notifier implementation. Used during startup to
+// break the circular dependency: bot.Setup needs the worker, but the real
+// TelegramNotifier needs the bot instance that Setup returns.
+func (w *NotificationWorker) SetNotifier(n notifier.Notifier) {
+	w.notifier = n
+}
+
 // notificationTickInterval is the worker's check cadence.
 const notificationTickInterval = 30 * time.Minute
 
@@ -67,6 +74,8 @@ func (w *NotificationWorker) check(ctx context.Context) {
 	}
 
 	now := time.Now().UTC()
+	log.Printf("[notification-worker] ── tick ── UTC now: %s", now.Format(time.RFC3339))
+
 	// Pre-filter at the DB level: anything that could possibly land on
 	// "tomorrow" in some user's timezone is at most ~26h out from now in
 	// UTC. Widen to 20-30h to keep the query small while still admitting
@@ -87,10 +96,11 @@ func (w *NotificationWorker) check(ctx context.Context) {
 	}
 
 	if len(subs) == 0 {
+		log.Println("[notification-worker] no candidate subscriptions found")
 		return
 	}
 
-	log.Printf("[notification-worker] found %d subscriptions due soon", len(subs))
+	log.Printf("[notification-worker] found %d candidate subscriptions", len(subs))
 
 	for _, sub := range subs {
 		select {
@@ -98,24 +108,31 @@ func (w *NotificationWorker) check(ctx context.Context) {
 			return
 		default:
 		}
+
+		userLabel := fmt.Sprintf("user %d (@%s)", sub.User.TelegramID, sub.User.Username)
+
 		if sub.User.TelegramID == 0 {
+			log.Printf("[notification-worker] skip %s sub %q: telegram_id=0", userLabel, sub.Name)
 			continue
 		}
 		if !sub.User.NotificationsEnabled {
+			log.Printf("[notification-worker] skip %s sub %q: notifications disabled", userLabel, sub.Name)
 			continue
 		}
 		if !shouldSendNow(&sub, &sub.User, now) {
-			continue
+			continue // reason already logged inside shouldSendNow
 		}
 
 		text := buildReminderText(&sub, sub.User.Locale)
 		markup := renewKeyboard(&sub, sub.User.Locale)
 
 		if err := w.notifier.SendMessageWithMarkup(ctx, sub.User.TelegramID, text, markup); err != nil {
-			log.Printf("[notification-worker] send to %d error: %v", sub.User.TelegramID, err)
+			log.Printf("[notification-worker] SEND FAILED %s sub %q: %v", userLabel, sub.Name, err)
 			continue
 		}
 
+		log.Printf("[notification-worker] ✓ notification sent to %s for sub %q (%.2f %s)",
+			userLabel, sub.Name, sub.Amount, sub.Currency)
 		w.db.WithContext(ctx).Model(&sub).Update("notified_at", now)
 	}
 }
@@ -138,6 +155,8 @@ func (w *NotificationWorker) check(ctx context.Context) {
 // the candidate window but its local date doesn't actually land tomorrow
 // for this particular user.
 func shouldSendNow(sub *model.Subscription, u *model.User, now time.Time) bool {
+	userLabel := fmt.Sprintf("user %d (@%s)", u.TelegramID, u.Username)
+
 	loc, err := time.LoadLocation(u.Timezone)
 	if err != nil || loc == nil {
 		loc = time.UTC
@@ -148,7 +167,17 @@ func shouldSendNow(sub *model.Subscription, u *model.User, now time.Time) bool {
 	if !isValidHHMM(preferredHHMM) {
 		preferredHHMM = "10:00"
 	}
+
+	log.Printf("[notification-worker] checking %s sub %q: local_time=%s, preferred=%s, next_payment=%s",
+		userLabel, sub.Name,
+		localNow.Format("2006-01-02 15:04"),
+		preferredHHMM,
+		sub.NextPaymentAt.In(loc).Format("2006-01-02 15:04"),
+	)
+
 	if localNow.Format("15:04") < preferredHHMM {
+		log.Printf("[notification-worker] skip %s sub %q: too early (now %s < preferred %s)",
+			userLabel, sub.Name, localNow.Format("15:04"), preferredHHMM)
 		return false
 	}
 
@@ -157,10 +186,20 @@ func shouldSendNow(sub *model.Subscription, u *model.User, now time.Time) bool {
 	if next.Year() != tomorrow.Year() ||
 		next.Month() != tomorrow.Month() ||
 		next.Day() != tomorrow.Day() {
+		log.Printf("[notification-worker] skip %s sub %q: payment date %s is not tomorrow (%s)",
+			userLabel, sub.Name,
+			next.Format("2006-01-02"),
+			tomorrow.Format("2006-01-02"),
+		)
 		return false
 	}
 
 	if sub.NotifiedAt != nil && now.Sub(*sub.NotifiedAt) < notificationDedupWindow {
+		log.Printf("[notification-worker] skip %s sub %q: already notified at %s (dedup window %s)",
+			userLabel, sub.Name,
+			sub.NotifiedAt.Format(time.RFC3339),
+			notificationDedupWindow,
+		)
 		return false
 	}
 
@@ -253,6 +292,64 @@ func escapeTelegramMarkdown(s string) string {
 // "HH:MM" 24-hour format we depend on for lexical comparison. The PATCH /me
 // handler enforces this on write via regexp, so this guard is defence in
 // depth — protects against rows predating the field or any direct DB edits.
+// ForceNotifyUser runs the notification logic for a specific user, ignoring
+// time-of-day checks and the notified_at dedup flag. Designed for admin
+// testing via the /force_notify bot command.
+func (w *NotificationWorker) ForceNotifyUser(ctx context.Context, userID uint) (sent int, total int, err error) {
+	now := time.Now().UTC()
+
+	var user model.User
+	if err := w.db.WithContext(ctx).First(&user, userID).Error; err != nil {
+		return 0, 0, fmt.Errorf("user lookup: %w", err)
+	}
+
+	loc, locErr := time.LoadLocation(user.Timezone)
+	if locErr != nil || loc == nil {
+		loc = time.UTC
+	}
+
+	// Find ALL subscriptions for this user — no time/dedup filtering.
+	var subs []model.Subscription
+	if err := w.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Find(&subs).Error; err != nil {
+		return 0, 0, fmt.Errorf("subscriptions query: %w", err)
+	}
+
+	// Filter to those whose next_payment lands "tomorrow" in the user's
+	// local timezone.
+	var candidates []model.Subscription
+	localNow := now.In(loc)
+	localTomorrow := localNow.AddDate(0, 0, 1)
+	for _, sub := range subs {
+		next := sub.NextPaymentAt.In(loc)
+		if next.Year() == localTomorrow.Year() &&
+			next.Month() == localTomorrow.Month() &&
+			next.Day() == localTomorrow.Day() {
+			candidates = append(candidates, sub)
+		}
+	}
+
+	total = len(candidates)
+	log.Printf("[force-notify] user %d: %d subs total, %d due tomorrow (%s)",
+		user.TelegramID, len(subs), total, localTomorrow.Format("2006-01-02"))
+
+	for _, sub := range candidates {
+		text := buildReminderText(&sub, user.Locale)
+		markup := renewKeyboard(&sub, user.Locale)
+
+		if sendErr := w.notifier.SendMessageWithMarkup(ctx, user.TelegramID, text, markup); sendErr != nil {
+			log.Printf("[force-notify] send failed for sub %q: %v", sub.Name, sendErr)
+			continue
+		}
+		log.Printf("[force-notify] ✓ sent sub %q (%.2f %s) to user %d",
+			sub.Name, sub.Amount, sub.Currency, user.TelegramID)
+		sent++
+	}
+
+	return sent, total, nil
+}
+
 func isValidHHMM(s string) bool {
 	if len(s) != 5 || s[2] != ':' {
 		return false
