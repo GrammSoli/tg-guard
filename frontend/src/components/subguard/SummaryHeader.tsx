@@ -30,9 +30,9 @@ export function SummaryHeader({
 
   return (
     <header className="safe-top relative px-5 pb-6 pt-4">
-      <div className="mb-5">
-        <p className="text-xs text-muted-foreground">{t("welcome.greeting")}</p>
-        <p className="text-base font-semibold">{user?.name ?? "Alex"}</p>
+      <div className="mb-5 flex items-baseline gap-1.5">
+        <p className="shrink-0 text-xs text-muted-foreground">{t("welcome.greeting")}</p>
+        <p className="truncate text-base font-semibold">{user?.name ?? "Alex"}</p>
       </div>
 
       <div
