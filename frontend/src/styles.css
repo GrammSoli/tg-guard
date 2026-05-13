@@ -157,3 +157,11 @@
 @utility animate-smooth-fade {
   animation: smooth-fade-in 0.25s ease-out;
 }
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

@@ -131,10 +131,12 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
           <PopoverTrigger asChild>
             <Button
-              variant="outline"
+              variant="ghost"
               className={cn(
-                "h-7 w-7 shrink-0 rounded-full border-white/10 p-0",
-                activePreset === "custom" && "border-primary/50 text-primary",
+                "h-7 w-7 shrink-0 rounded-full p-0",
+                activePreset === "custom"
+                  ? "ring-1.5 ring-primary/50 text-primary"
+                  : "text-muted-foreground hover:bg-surface-elevated",
               )}
             >
               <CalendarIcon className="h-3.5 w-3.5" />
