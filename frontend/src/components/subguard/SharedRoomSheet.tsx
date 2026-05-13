@@ -553,23 +553,7 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
                     </div>
                   ) : (
                     <>
-                      {filteredAvailable.map((p, i) => (
-                        <button
-                          key={p.id}
-                          onClick={() => handleServiceClick(p)}
-                          className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
-                          style={{ animationDelay: `${i * 30}ms`, animationFillMode: "backwards" }}
-                        >
-                          <ServiceLogo brand={p.brand as any} name={p.name} size={32} rounded="xl" />
-                          <span className="flex-1 text-sm font-medium">{p.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {formatCurrency(convertCurrency(p.defaultAmount, p.defaultCurrency, userCurrency), userCurrency, lc)}
-                          </span>
-                          <Plus className="h-4 w-4 text-muted-foreground" />
-                        </button>
-                      ))}
-
-                      {/* Custom service button */}
+                      {/* Custom service button — always first */}
                       {!customMode && (
                         <button
                           onClick={() => setCustomMode(true)}
@@ -646,6 +630,22 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
                           </div>
                         </div>
                       )}
+
+                      {filteredAvailable.map((p, i) => (
+                        <button
+                          key={p.id}
+                          onClick={() => handleServiceClick(p)}
+                          className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
+                          style={{ animationDelay: `${i * 30}ms`, animationFillMode: "backwards" }}
+                        >
+                          <ServiceLogo brand={p.brand as any} name={p.name} size={32} rounded="xl" />
+                          <span className="flex-1 text-sm font-medium">{p.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatCurrency(convertCurrency(p.defaultAmount, p.defaultCurrency, userCurrency), userCurrency, lc)}
+                          </span>
+                          <Plus className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      ))}
                     </>
                   )}
                 </div>
