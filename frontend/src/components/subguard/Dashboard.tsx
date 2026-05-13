@@ -185,21 +185,29 @@ export function Dashboard({ partnerOffers, user }: Props) {
     [items, settings.defaultCurrency],
   );
 
-  const handleSave = (data: Omit<Subscription, "id"> & { id?: string }) => {
-    if (data.id) {
-      updateSubscription(data.id, data);
-    } else {
-      addSubscription(data as Omit<Subscription, "id">);
+  const handleSave = async (data: Omit<Subscription, "id"> & { id?: string }) => {
+    try {
+      if (data.id) {
+        await updateSubscription(data.id, data);
+      } else {
+        await addSubscription(data as Omit<Subscription, "id">);
+      }
+      setEditing(null);
+      hapticNotification("success");
+    } catch {
+      hapticNotification("error");
     }
-    setEditing(null);
-    hapticNotification("success");
   };
 
-  const handleDelete = (id: string) => {
-    deleteSubscription(id);
-    setSheetOpen(false);
-    setEditing(null);
-    hapticNotification("warning");
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteSubscription(id);
+      setSheetOpen(false);
+      setEditing(null);
+      hapticNotification("warning");
+    } catch {
+      hapticNotification("error");
+    }
   };
 
   const openAdd = () => {

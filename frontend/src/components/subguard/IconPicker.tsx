@@ -1,3 +1,4 @@
+import React from "react";
 import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import { COLOR_LIST, ICON_LIST } from "@/lib/customIcons";
@@ -26,7 +27,7 @@ interface Props {
  * and re-feeds them in. That keeps the picker pure and the avatar preview
  * in the form header trivially live.
  */
-export function IconPicker({ iconName, iconColor, onChange }: Props) {
+export const IconPicker = React.memo(function IconPicker({ iconName, iconColor, onChange }: Props) {
   const { t } = useTranslation();
 
   return (
@@ -86,4 +87,4 @@ export function IconPicker({ iconName, iconColor, onChange }: Props) {
       </div>
     </div>
   );
-}
+});

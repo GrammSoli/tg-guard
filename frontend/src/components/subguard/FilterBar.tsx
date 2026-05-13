@@ -17,7 +17,11 @@ interface Props {
  */
 export function FilterBar({ value, onChange, onOpenFilters }: Props) {
   const { t } = useTranslation();
-  const hasActiveFilters = useSubscriptionStore((s) => s.hasActiveFilters)();
+  const hasActiveFilters = useSubscriptionStore((s) =>
+    s.sortBy !== "nextPayment" ||
+    s.filterTypes.length > 0 ||
+    s.filterCategories.length > 0
+  );
 
   return (
     <div className="px-5">

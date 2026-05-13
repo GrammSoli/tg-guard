@@ -35,7 +35,7 @@ type User struct {
 // Subscription represents a user's tracked subscription.
 type Subscription struct {
 	ID            uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	UserID        uint       `gorm:"index;not null" json:"-"`
+	UserID        uint       `gorm:"index:idx_sub_user_payment,priority:1;not null" json:"-"`
 	User          User       `gorm:"foreignKey:UserID" json:"-"`
 	Name          string     `gorm:"not null;size:100" json:"name"`
 	Brand         string     `gorm:"default:default;size:32" json:"brand"`
@@ -53,7 +53,7 @@ type Subscription struct {
 	Amount        float64    `gorm:"not null" json:"amount"`
 	Currency      string     `gorm:"default:USD;size:3" json:"currency"`
 	Period        string     `gorm:"default:monthly;size:10" json:"period"` // monthly | yearly | weekly
-	NextPaymentAt time.Time  `gorm:"index;not null" json:"next_payment_at"`
+	NextPaymentAt time.Time  `gorm:"index;index:idx_sub_user_payment,priority:2;not null" json:"next_payment_at"`
 	IsTrial       bool       `gorm:"default:false" json:"is_trial"`
 	TrialEndsAt   *time.Time `json:"trial_ends_at"`
 	IsAutoPay     bool       `gorm:"default:true" json:"is_auto_pay"`

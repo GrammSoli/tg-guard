@@ -16,18 +16,11 @@ import (
 	"github.com/subguard/backend/internal/config"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/repository"
+	"github.com/subguard/backend/internal/tgutil"
 	"github.com/subguard/backend/internal/worker"
 )
 
-// renewCallbackPrefix / cancelCallbackPrefix are the CallbackData prefixes
-// written by the notification worker into the two-button inline keyboard
-// attached to every reminder. Mirrored from internal/worker/notification.go
-// — kept in sync by code review (small enough that introducing a shared
-// constants package would be more boilerplate than benefit).
-const (
-	renewCallbackPrefix  = "renew_sub_"
-	cancelCallbackPrefix = "cancel_sub_"
-)
+// Callback prefixes imported from tgutil — shared with worker package.
 
 // Setup initializes the Telegram bot with handlers and returns the bot instance.
 func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWorker) (*tgbot.Bot, error) {
@@ -53,12 +46,12 @@ func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWork
 
 	// Inline-button callbacks from the reminder keyboard — see
 	// internal/worker/notification.go for the buttons that produce these.
-	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, renewCallbackPrefix, tgbot.MatchTypePrefix,
+	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, tgutil.RenewCallbackPrefix, tgbot.MatchTypePrefix,
 		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
 			handleRenewCallback(ctx, b, update, db)
 		},
 	)
-	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, cancelCallbackPrefix, tgbot.MatchTypePrefix,
+	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, tgutil.CancelCallbackPrefix, tgbot.MatchTypePrefix,
 		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
 			handleCancelCallback(ctx, b, update, db)
 		},
@@ -166,7 +159,7 @@ func handleRenewCallback(ctx context.Context, b *tgbot.Bot, update *models.Updat
 		}
 	}
 
-	idStr := strings.TrimPrefix(cb.Data, renewCallbackPrefix)
+	idStr := strings.TrimPrefix(cb.Data, tgutil.RenewCallbackPrefix)
 	subID, err := uuid.Parse(idStr)
 	if err != nil {
 		answerAndLog("invalid subscription id")
@@ -254,7 +247,7 @@ func handleCancelCallback(ctx context.Context, b *tgbot.Bot, update *models.Upda
 		}
 	}
 
-	idStr := strings.TrimPrefix(cb.Data, cancelCallbackPrefix)
+	idStr := strings.TrimPrefix(cb.Data, tgutil.CancelCallbackPrefix)
 	subID, err := uuid.Parse(idStr)
 	if err != nil {
 		answerAndLog("invalid subscription id")
@@ -359,18 +352,9 @@ func renewConfirmationText(sub *model.Subscription, locale string) string {
 		escapeMarkdownLite(sub.Name), dateStr)
 }
 
-// escapeMarkdownLite escapes the four characters legacy Markdown parse mode
-// interprets. Kept local to bot.go so worker and bot don't reach into each
-// other's internals.
-var markdownLiteReplacer = strings.NewReplacer(
-	"*", `\*`,
-	"_", `\_`,
-	"`", "\\`",
-	"[", `\[`,
-)
-
+// escapeMarkdownLite delegates to the shared tgutil package.
 func escapeMarkdownLite(s string) string {
-	return markdownLiteReplacer.Replace(s)
+	return tgutil.EscapeMarkdown(s)
 }
 
 // handleForceNotify is an admin-only test command that forces the notification

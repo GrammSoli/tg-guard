@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/subguard/backend/internal/config"
@@ -112,11 +113,13 @@ func (h *UserHandler) UpdateMe(c fiber.Ctx) error {
 		updates["locale"] = *body.Locale
 	}
 	if body.Timezone != nil {
-		// Trust the IANA tz name the client (Intl API) supplies. Length cap
-		// matches the column size; further validation lives in the worker
-		// (LoadLocation falls back to UTC on bad input).
 		if len(*body.Timezone) > 64 {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "timezone too long"})
+		}
+		// Validate the IANA tz name so we never persist garbage that the
+		// worker will silently fall back to UTC on.
+		if _, tzErr := time.LoadLocation(*body.Timezone); tzErr != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid timezone"})
 		}
 		updates["timezone"] = *body.Timezone
 	}
@@ -141,7 +144,7 @@ func (h *UserHandler) UpdateMe(c fiber.Ctx) error {
 			// are visible in logs instead of being masked by a generic 500.
 			log.Printf("[user.UpdateMe] user=%d update error: %v", user.ID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "update failed: " + err.Error(),
+				"error": "update failed",
 			})
 		}
 	}
@@ -277,10 +280,10 @@ func (h *UserHandler) DeleteMe(c fiber.Ctx) error {
 
 		// 2) rooms the user OWNS — fetch ids, then nuke their services,
 		//    members, and the rooms themselves.
-		var ownedRoomIDs []string
+		var ownedRoomIDs []uuid.UUID
 		if err := tx.Model(&model.SharedRoom{}).
 			Where("owner_id = ?", uid).
-			Pluck("id::text", &ownedRoomIDs).Error; err != nil {
+			Pluck("id", &ownedRoomIDs).Error; err != nil {
 			return fmt.Errorf("list owned rooms: %w", err)
 		}
 		if len(ownedRoomIDs) > 0 {

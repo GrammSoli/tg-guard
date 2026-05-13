@@ -235,7 +235,10 @@ func (h *RoomHandler) DeleteRoom(c fiber.Ctx) error {
 	if room.OwnerID != user.ID {
 		return c.Status(403).JSON(fiber.Map{"error": "owner only"})
 	}
-	h.repo.Delete(id)
+	if err := h.repo.Delete(id); err != nil {
+		log.Printf("[room.DeleteRoom] room=%s delete error: %v", id, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "delete failed"})
+	}
 	return c.JSON(fiber.Map{"deleted": true})
 }
 
@@ -320,7 +323,11 @@ func (h *RoomHandler) RemoveService(c fiber.Ctx) error {
 	if err != nil || room.OwnerID != user.ID {
 		return c.Status(403).JSON(fiber.Map{"error": "forbidden"})
 	}
-	h.repo.RemoveService(roomID, c.Params("brand"))
+	sid, err := strconv.ParseUint(c.Params("sid"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid service id"})
+	}
+	h.repo.RemoveService(roomID, uint(sid))
 	return c.JSON(fiber.Map{"ok": true})
 }
 

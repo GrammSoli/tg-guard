@@ -36,7 +36,11 @@ func (r *SubscriptionRepo) Create(sub *model.Subscription) error {
 }
 
 func (r *SubscriptionRepo) Update(sub *model.Subscription) error {
-	return r.db.Save(sub).Error
+	return r.db.Model(sub).Select(
+		"Name", "Brand", "Tag", "Note", "IconName", "IconColor",
+		"Amount", "Currency", "Period", "NextPaymentAt",
+		"IsTrial", "IsAutoPay",
+	).Updates(sub).Error
 }
 
 func (r *SubscriptionRepo) Delete(id uuid.UUID, userID uint) error {
