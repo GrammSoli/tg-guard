@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,7 +29,14 @@ import (
 	"github.com/subguard/backend/internal/notifier"
 	"github.com/subguard/backend/internal/seed"
 	"github.com/subguard/backend/internal/worker"
+	"github.com/subguard/backend/internal/workerutil"
 )
+
+// workerDrainTimeout caps how long graceful shutdown waits for in-flight
+// worker ticks to finish before forcing rdb/db close. 15s is generous for
+// a notification batch (typical tick < 5s) and short enough that k8s
+// pre-stop deadlines stay inside the default 30s grace period.
+const workerDrainTimeout = 15 * time.Second
 
 func main() {
 	// ── Config ─────────────────────────────────────────
@@ -144,16 +152,34 @@ func main() {
 	}
 
 	// ── Workers (background goroutines) ────────────────
+	// Each worker runs inside workerutil.Supervise so a panic logs the
+	// stack and restarts the loop after a cool-off instead of crashing
+	// the whole binary. workerWG lets the shutdown handler wait for all
+	// worker ticks to finish before closing DB / Redis pools.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	currencyWorker := worker.NewCurrencyWorker(rdb)
-	go currencyWorker.Start(ctx)
+	var workerWG sync.WaitGroup
 
-	go notifWorker.Start(ctx)
+	currencyWorker := worker.NewCurrencyWorker(rdb)
+	workerWG.Add(1)
+	go func() {
+		defer workerWG.Done()
+		workerutil.Supervise("currency-worker", func() { currencyWorker.Start(ctx) })
+	}()
+
+	workerWG.Add(1)
+	go func() {
+		defer workerWG.Done()
+		workerutil.Supervise("notification-worker", func() { notifWorker.Start(ctx) })
+	}()
 
 	billingWorker := worker.NewBillingResetWorker(db)
-	go billingWorker.Start(ctx)
+	workerWG.Add(1)
+	go func() {
+		defer workerWG.Done()
+		workerutil.Supervise("billing-reset", func() { billingWorker.Start(ctx) })
+	}()
 
 	// ── Fiber app ──────────────────────────────────────
 	app := fiber.New(fiber.Config{
@@ -253,9 +279,29 @@ func main() {
 		<-sigCh
 		log.Println("shutting down...")
 		cancel()
+
+		// Stop accepting HTTP traffic first so in-flight handlers drain
+		// cleanly while the workers also wind down.
 		if err := app.Shutdown(); err != nil {
 			log.Printf("fiber shutdown error: %v", err)
 		}
+
+		// Wait for all worker goroutines to return. STRICTLY before we
+		// close the DB / Redis pools — otherwise a mid-tick worker would
+		// error out trying to write notified_at against a closed pool,
+		// causing duplicate notifications on the next start.
+		drained := make(chan struct{})
+		go func() {
+			workerWG.Wait()
+			close(drained)
+		}()
+		select {
+		case <-drained:
+			log.Println("workers drained cleanly")
+		case <-time.After(workerDrainTimeout):
+			log.Printf("⚠️  workers did not drain within %s — forcing shutdown", workerDrainTimeout)
+		}
+
 		if err := rdb.Close(); err != nil {
 			log.Printf("redis close error: %v", err)
 		}

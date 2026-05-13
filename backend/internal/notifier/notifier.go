@@ -5,10 +5,18 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
+
+// telegramSendTimeout bounds the per-call wait on the Telegram API. The
+// worker context can be very long-lived (the whole process lifetime),
+// so without this a hung Bot API would block a notification worker
+// goroutine indefinitely. 10s is generous for a successful round-trip
+// and well under any reasonable shutdown grace window.
+const telegramSendTimeout = 10 * time.Second
 
 // Notifier abstracts Telegram message sending so we can swap real and mock
 // implementations (e.g. for E2E tests).
@@ -36,7 +44,9 @@ func NewTelegramNotifier(b *bot.Bot) *TelegramNotifier {
 }
 
 func (n *TelegramNotifier) SendMessage(ctx context.Context, chatID int64, text string) error {
-	_, err := n.bot.SendMessage(ctx, &bot.SendMessageParams{
+	sendCtx, cancel := context.WithTimeout(ctx, telegramSendTimeout)
+	defer cancel()
+	_, err := n.bot.SendMessage(sendCtx, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      text,
 		ParseMode: "Markdown",
@@ -45,7 +55,9 @@ func (n *TelegramNotifier) SendMessage(ctx context.Context, chatID int64, text s
 }
 
 func (n *TelegramNotifier) SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup models.ReplyMarkup) error {
-	_, err := n.bot.SendMessage(ctx, &bot.SendMessageParams{
+	sendCtx, cancel := context.WithTimeout(ctx, telegramSendTimeout)
+	defer cancel()
+	_, err := n.bot.SendMessage(sendCtx, &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        text,
 		ParseMode:   "Markdown",

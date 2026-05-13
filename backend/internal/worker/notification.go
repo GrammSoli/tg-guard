@@ -2,18 +2,36 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/notifier"
 	"github.com/subguard/backend/internal/tgutil"
+	"github.com/subguard/backend/internal/workerutil"
 )
+
+// notificationBatchSize streams candidate subscriptions in chunks so the
+// worker can't OOM if a single tick has tens of thousands of due rows.
+const notificationBatchSize = 500
+
+// maxSendRetries caps retry_after-driven retries per subscription on a
+// 429 from Telegram. Two retries plus the original attempt is enough for
+// the typical Bot API back-off; on a third failure we give up for this
+// tick — the dedup window keeps us from hammering on the next tick.
+const maxSendRetries = 2
+
+// errBatchCancelled is the sentinel error FindInBatches returns when we
+// abort iteration because the parent context was cancelled. Treated as
+// success in the surrounding logic — we already wrote what we could.
+var errBatchCancelled = errors.New("batch cancelled by ctx")
 
 // NotificationWorker checks upcoming payments and sends Telegram reminders.
 type NotificationWorker struct {
@@ -78,59 +96,134 @@ func (w *NotificationWorker) check(ctx context.Context) {
 	windowStart := now.Add(20 * time.Hour)
 	windowEnd := now.Add(30 * time.Hour)
 
-	var subs []model.Subscription
+	// Track successfully-sent IDs so we can bulk-update notified_at in a
+	// single statement at the end. Stream via FindInBatches so a tick
+	// with 100k due rows doesn't load them all into memory.
+	sentIDs := make([]uuid.UUID, 0, notificationBatchSize)
+	var seen, sentCount int
+
+	dest := &[]model.Subscription{}
 	err := w.db.WithContext(ctx).
 		Preload("User", func(db *gorm.DB) *gorm.DB {
 			return db.Select("id, telegram_id, username, notifications_enabled, timezone, notification_time, locale")
 		}).
 		Where("next_payment_at BETWEEN ? AND ?", windowStart, windowEnd).
 		Where("notified_at IS NULL OR notified_at < ?", now.Add(-notificationDedupWindow)).
-		Find(&subs).Error
-	if err != nil {
-		log.Printf("[notification-worker] query error: %v", err)
-		return
+		Order("next_payment_at ASC, id ASC").
+		FindInBatches(dest, notificationBatchSize, func(tx *gorm.DB, batchNum int) error {
+			batchSubs, ok := tx.Statement.Dest.(*[]model.Subscription)
+			if !ok {
+				return errors.New("unexpected batch dest type")
+			}
+			seen += len(*batchSubs)
+
+			for i := range *batchSubs {
+				select {
+				case <-ctx.Done():
+					return errBatchCancelled
+				default:
+				}
+				sub := &(*batchSubs)[i]
+				if w.tryProcessOne(ctx, sub, now) {
+					sentIDs = append(sentIDs, sub.ID)
+					sentCount++
+				}
+			}
+			return nil
+		}).Error
+
+	if err != nil && !errors.Is(err, errBatchCancelled) && !errors.Is(err, context.Canceled) {
+		log.Printf("[notification-worker] batch iteration error: %v", err)
 	}
 
-	if len(subs) == 0 {
+	if seen == 0 {
 		log.Println("[notification-worker] no candidate subscriptions found")
-		return
+	} else {
+		log.Printf("[notification-worker] processed %d candidates, sent %d reminders", seen, sentCount)
 	}
 
-	log.Printf("[notification-worker] found %d candidate subscriptions", len(subs))
-
-	for _, sub := range subs {
-		select {
-		case <-ctx.Done():
-			return
-		default:
+	// Bulk-persist notified_at. Use a fresh short context so that even on
+	// SIGTERM mid-tick we still record what already went out — otherwise
+	// the next worker start would re-send the same reminders. The parent
+	// ctx may be cancelled at this point, so we deliberately start from
+	// context.Background() with a 5s budget.
+	if len(sentIDs) > 0 {
+		persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer persistCancel()
+		if err := w.db.WithContext(persistCtx).
+			Model(&model.Subscription{}).
+			Where("id IN ?", sentIDs).
+			Update("notified_at", now).Error; err != nil {
+			log.Printf("[notification-worker] bulk notified_at update failed for %d subs: %v",
+				len(sentIDs), err)
 		}
-
-		userLabel := fmt.Sprintf("user %d (@%s)", sub.User.TelegramID, sub.User.Username)
-
-		if sub.User.TelegramID == 0 {
-			log.Printf("[notification-worker] skip %s sub %q: telegram_id=0", userLabel, sub.Name)
-			continue
-		}
-		if !sub.User.NotificationsEnabled {
-			log.Printf("[notification-worker] skip %s sub %q: notifications disabled", userLabel, sub.Name)
-			continue
-		}
-		if !shouldSendNow(&sub, &sub.User, now) {
-			continue // reason already logged inside shouldSendNow
-		}
-
-		text := buildReminderText(&sub, sub.User.Locale)
-		markup := renewKeyboard(&sub, sub.User.Locale)
-
-		if err := w.notifier.SendMessageWithMarkup(ctx, sub.User.TelegramID, text, markup); err != nil {
-			log.Printf("[notification-worker] SEND FAILED %s sub %q: %v", userLabel, sub.Name, err)
-			continue
-		}
-
-		log.Printf("[notification-worker] ✓ notification sent to %s for sub %q (%.2f %s)",
-			userLabel, sub.Name, sub.Amount, sub.Currency)
-		w.db.WithContext(ctx).Model(&sub).Update("notified_at", now)
 	}
+}
+
+// tryProcessOne is the per-subscription gate + send loop. Returns true iff
+// the reminder was delivered (so the caller should mark notified_at).
+// All skip reasons are logged inside the helper or shouldSendNow.
+func (w *NotificationWorker) tryProcessOne(ctx context.Context, sub *model.Subscription, now time.Time) bool {
+	userLabel := fmt.Sprintf("user %d (@%s)", sub.User.TelegramID, sub.User.Username)
+
+	if sub.User.TelegramID == 0 {
+		log.Printf("[notification-worker] skip %s sub %q: telegram_id=0", userLabel, sub.Name)
+		return false
+	}
+	if !sub.User.NotificationsEnabled {
+		log.Printf("[notification-worker] skip %s sub %q: notifications disabled", userLabel, sub.Name)
+		return false
+	}
+	if !shouldSendNow(sub, &sub.User, now) {
+		return false // reason already logged inside shouldSendNow
+	}
+
+	text := buildReminderText(sub, sub.User.Locale)
+	markup := renewKeyboard(sub, sub.User.Locale)
+
+	if !w.sendWithRetry(ctx, sub.User.TelegramID, text, markup, userLabel, sub.Name) {
+		return false
+	}
+	log.Printf("[notification-worker] ✓ notification sent to %s for sub %q (%.2f %s)",
+		userLabel, sub.Name, sub.Amount, sub.Currency)
+	return true
+}
+
+// sendWithRetry calls the notifier and re-tries on Telegram 429 using the
+// retry_after hint embedded in the error string. Caps at maxSendRetries
+// retries so a misbehaving API can't trap the worker for a full hour.
+// Returns true on success, false if all retries failed or ctx was
+// cancelled mid-back-off.
+func (w *NotificationWorker) sendWithRetry(
+	ctx context.Context,
+	chatID int64,
+	text string,
+	markup *models.InlineKeyboardMarkup,
+	userLabel, subName string,
+) bool {
+	for attempt := 0; attempt <= maxSendRetries; attempt++ {
+		err := w.notifier.SendMessageWithMarkup(ctx, chatID, text, markup)
+		if err == nil {
+			return true
+		}
+
+		delay, isRateLimit := workerutil.ParseRetryAfter(err)
+		if isRateLimit && attempt < maxSendRetries {
+			log.Printf("[notification-worker] 429 for %s sub %q — sleeping %s (attempt %d/%d)",
+				userLabel, subName, delay, attempt+1, maxSendRetries)
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(delay):
+			}
+			continue
+		}
+
+		log.Printf("[notification-worker] SEND FAILED %s sub %q (attempt %d): %v",
+			userLabel, subName, attempt+1, err)
+		return false
+	}
+	return false
 }
 
 // shouldSendNow decides whether a candidate subscription deserves a
