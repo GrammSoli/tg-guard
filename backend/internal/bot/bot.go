@@ -18,10 +18,15 @@ import (
 	"github.com/subguard/backend/internal/repository"
 )
 
-// renewCallbackPrefix is the CallbackData prefix written by the notification
-// worker into its inline "Renew" button. The bot dispatches on this prefix
-// inside handleRenewCallback.
-const renewCallbackPrefix = "renew_sub_"
+// renewCallbackPrefix / cancelCallbackPrefix are the CallbackData prefixes
+// written by the notification worker into the two-button inline keyboard
+// attached to every reminder. Mirrored from internal/worker/notification.go
+// — kept in sync by code review (small enough that introducing a shared
+// constants package would be more boilerplate than benefit).
+const (
+	renewCallbackPrefix  = "renew_sub_"
+	cancelCallbackPrefix = "cancel_sub_"
+)
 
 // Setup initializes the Telegram bot with handlers and returns the bot instance.
 func Setup(cfg *config.Config, db *gorm.DB) (*tgbot.Bot, error) {
@@ -45,11 +50,16 @@ func Setup(cfg *config.Config, db *gorm.DB) (*tgbot.Bot, error) {
 		},
 	)
 
-	// Inline-button renewal — see internal/worker/notification.go for the
-	// button that produces these callbacks.
+	// Inline-button callbacks from the reminder keyboard — see
+	// internal/worker/notification.go for the buttons that produce these.
 	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, renewCallbackPrefix, tgbot.MatchTypePrefix,
 		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
 			handleRenewCallback(ctx, b, update, db)
+		},
+	)
+	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, cancelCallbackPrefix, tgbot.MatchTypePrefix,
+		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
+			handleCancelCallback(ctx, b, update, db)
 		},
 	)
 
@@ -213,6 +223,83 @@ func handleRenewCallback(ctx context.Context, b *tgbot.Bot, update *models.Updat
 	}
 }
 
+// handleCancelCallback processes the inline "Cancelled" button. Hard-
+// deletes the subscription, acks the callback to drop the spinner, and
+// rewrites the original reminder message into a "🗑 deleted" confirmation
+// so the chat log doesn't show a stale renewal ping.
+//
+// Same owner-authorization gate as renew — a forwarded message can't be
+// used to delete someone else's subscription.
+func handleCancelCallback(ctx context.Context, b *tgbot.Bot, update *models.Update, db *gorm.DB) {
+	cb := update.CallbackQuery
+	if cb == nil {
+		return
+	}
+
+	answerAndLog := func(text string) {
+		if _, err := b.AnswerCallbackQuery(ctx, &tgbot.AnswerCallbackQueryParams{
+			CallbackQueryID: cb.ID,
+			Text:            text,
+		}); err != nil {
+			log.Printf("[bot.cancel] AnswerCallbackQuery error: %v", err)
+		}
+	}
+
+	idStr := strings.TrimPrefix(cb.Data, cancelCallbackPrefix)
+	subID, err := uuid.Parse(idStr)
+	if err != nil {
+		answerAndLog("invalid subscription id")
+		return
+	}
+
+	var sub model.Subscription
+	if err := db.WithContext(ctx).First(&sub, "id = ?", subID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			answerAndLog("already deleted")
+		} else {
+			log.Printf("[bot.cancel] lookup error: %v", err)
+			answerAndLog("lookup failed")
+		}
+		return
+	}
+
+	var owner model.User
+	if err := db.WithContext(ctx).First(&owner, sub.UserID).Error; err != nil {
+		log.Printf("[bot.cancel] owner lookup error: %v", err)
+		answerAndLog("forbidden")
+		return
+	}
+	if owner.TelegramID != cb.From.ID {
+		answerAndLog("not your subscription")
+		return
+	}
+
+	// Hard delete — Subscription has no DeletedAt column and we'd otherwise
+	// need the auth path to filter on it. Matches the existing
+	// DELETE /api/v1/subscriptions/:id repository call.
+	if err := db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", sub.ID, owner.ID).
+		Delete(&model.Subscription{}).Error; err != nil {
+		log.Printf("[bot.cancel] delete error: %v", err)
+		answerAndLog("delete failed")
+		return
+	}
+
+	answerAndLog(cancelToastLabel(owner.Locale))
+
+	if cb.Message.Message != nil {
+		newText := cancelConfirmationText(&sub, owner.Locale)
+		if _, err := b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+			ChatID:    cb.Message.Message.Chat.ID,
+			MessageID: cb.Message.Message.ID,
+			Text:      newText,
+			ParseMode: "Markdown",
+		}); err != nil {
+			log.Printf("[bot.cancel] edit message error: %v", err)
+		}
+	}
+}
+
 // advancePayment moves a payment date forward by one billing period.
 // Defaults to monthly for unknown / missing period strings.
 func advancePayment(from time.Time, period string) time.Time {
@@ -231,6 +318,21 @@ func renewToastLabel(locale string) string {
 		return "✅ Дата обновлена"
 	}
 	return "✅ Renewed"
+}
+
+func cancelToastLabel(locale string) string {
+	if locale == "ru" {
+		return "🗑 Подписка удалена"
+	}
+	return "🗑 Subscription removed"
+}
+
+func cancelConfirmationText(sub *model.Subscription, locale string) string {
+	name := escapeMarkdownLite(sub.Name)
+	if locale == "ru" {
+		return fmt.Sprintf("🗑 Подписка *%s* удалена из вашего списка.", name)
+	}
+	return fmt.Sprintf("🗑 Subscription *%s* removed from your list.", name)
 }
 
 func renewConfirmationText(sub *model.Subscription, locale string) string {

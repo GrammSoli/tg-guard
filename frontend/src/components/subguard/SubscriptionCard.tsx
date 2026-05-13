@@ -23,9 +23,19 @@ export function SubscriptionCard({ subscription, onClick }: Props) {
   // Convert to user's preferred currency
   const displayAmount = convertCurrency(s.amount, s.currency, userCurrency);
 
+  // Overdue = next_payment_at is strictly before today's midnight (i.e.
+  // it was due yesterday or earlier). Trials don't get the overdue badge —
+  // an expired trial is a separate UX concern.
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
+  const isOverdue =
+    !s.is_trial && new Date(s.next_payment_at).getTime() < todayMidnight.getTime();
+
   let dateLabel: string;
   if (s.is_trial && s.trial_ends_at) {
     dateLabel = `${t("card.trialEndsOn")} ${formatDate(s.trial_ends_at, lc)}`;
+  } else if (isOverdue) {
+    dateLabel = `${t("card.overdue")} (${formatDate(s.next_payment_at, lc)})`;
   } else if (!s.is_auto_pay) {
     dateLabel = `${t("card.manualPayment")} ${formatDate(s.next_payment_at, lc)}`;
   } else {
@@ -59,7 +69,11 @@ export function SubscriptionCard({ subscription, onClick }: Props) {
             </span>
           )}
         </div>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+        <p
+          className={`mt-0.5 truncate text-xs ${
+            isOverdue ? "font-semibold text-destructive" : "text-muted-foreground"
+          }`}
+        >
           <DateTz>{dateLabel}</DateTz>
         </p>
       </div>

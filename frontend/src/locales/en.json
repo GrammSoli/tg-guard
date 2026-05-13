@@ -8,6 +8,7 @@
   "card.renewsOn": "Renews on",
   "card.trialEndsOn": "Trial ends on",
   "card.manualPayment": "Manual payment due",
+  "card.overdue": "Overdue",
   "card.trial": "TRIAL",
   "card.autoPay": "AUTO-PAY",
   "nav.dashboard": "Dashboard",
