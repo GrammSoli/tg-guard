@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useDragScroll } from "@/hooks/useDragScroll";
 import { subDays, subMonths, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay, format } from "date-fns";
 import { ru as ruLocale } from "date-fns/locale/ru";
 import { CalendarIcon, ChevronDown } from "lucide-react";
@@ -53,6 +54,7 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
     presets.find((p) => p.key === "all")!.range(),
   );
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const dragScrollRef = useDragScroll<HTMLDivElement>();
 
   const handlePreset = (p: Preset) => {
     setActivePreset(p.key);
@@ -106,7 +108,10 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
     <div className="space-y-5 px-5">
       {/* ── Date Range Selector ── */}
       <div className="flex items-center gap-2">
-        <div className="no-scrollbar flex flex-1 gap-1.5 overflow-x-auto">
+        <div
+          ref={dragScrollRef}
+          className="no-scrollbar flex flex-1 gap-1.5 overflow-x-auto select-none cursor-grab active:cursor-grabbing"
+        >
           {presets.map((p) => (
             <button
               key={p.key}
