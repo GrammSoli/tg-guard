@@ -5,6 +5,26 @@ import { localeFor } from "@/lib/format";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { brandColorFor } from "@/lib/brandLogo";
+import { COLOR_MAP } from "@/lib/customIcons";
+
+/**
+ * Resolve the visual style for a single day-marker dot. Custom-subscription
+ * colour (icon_color, stored as a colour-id like "blue") takes precedence
+ * via a Tailwind bg-* class — the class names live as full literals in
+ * COLOR_LIST so Tailwind's class extractor picks them up. For real-brand
+ * subscriptions (or custom subs with no colour saved) we fall back to the
+ * existing brand-HEX inline style.
+ */
+function markerStyle(s: Subscription): {
+  className: string;
+  style?: React.CSSProperties;
+} {
+  if (s.icon_color) {
+    const colour = COLOR_MAP[s.icon_color];
+    if (colour) return { className: colour.bg };
+  }
+  return { className: "", style: { backgroundColor: brandColorFor(s.brand) } };
+}
 
 interface Props {
   subscriptions: Subscription[];
@@ -131,13 +151,16 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
                 </span>
                 {dayBills.length > 0 && (
                   <div className="flex items-center justify-center gap-0.5">
-                    {dayBills.slice(0, 3).map((s) => (
-                      <span
-                        key={s.id}
-                        className="inline-block h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: brandColorFor(s.brand) }}
-                      />
-                    ))}
+                    {dayBills.slice(0, 3).map((s) => {
+                      const m = markerStyle(s);
+                      return (
+                        <span
+                          key={s.id}
+                          className={`inline-block h-1.5 w-1.5 rounded-full ${m.className}`}
+                          style={m.style}
+                        />
+                      );
+                    })}
                     {dayBills.length > 3 && (
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
                     )}
