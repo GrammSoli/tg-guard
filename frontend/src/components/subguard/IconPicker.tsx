@@ -10,9 +10,17 @@ interface Props {
 }
 
 /**
- * IconPicker — two compact strips for choosing the avatar appearance of a
- * custom (Brand === "default") subscription. Icons scroll horizontally on
- * narrow screens; colours stay in a single row.
+ * IconPicker — two compact grids for choosing the avatar appearance of a
+ * custom (Brand === "default") subscription. Icons render in a 5-column
+ * grid that wraps to as many rows as needed; colours wrap into a single
+ * row (or two, on very narrow popovers).
+ *
+ * Why a grid instead of a horizontal scroll strip? Inside a desktop
+ * Popover the previous horizontal-scroll layout was unreachable with a
+ * mouse wheel — wheel events scroll vertically, not horizontally. A
+ * wrapping grid + bounded max-height with vertical overflow gives the
+ * intuitive scrollbar-with-wheel UX on desktop and stays touch-friendly
+ * on mobile.
  *
  * The picker doesn't own state — the parent form holds iconName/iconColor
  * and re-feeds them in. That keeps the picker pure and the avatar preview
@@ -27,36 +35,34 @@ export function IconPicker({ iconName, iconColor, onChange }: Props) {
         {t("modal.appearance")}
       </p>
 
-      {/* Icons — horizontal scroll, 5 visible at a time */}
-      <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="flex gap-2">
-          {ICON_LIST.map(({ name, Icon }) => {
-            const active = name === iconName;
-            return (
-              <button
-                key={name}
-                type="button"
-                onClick={() => {
-                  hapticSelection();
-                  onChange({ iconName: name, iconColor });
-                }}
-                aria-label={name}
-                aria-pressed={active}
-                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors active:scale-95 ${
-                  active
-                    ? "bg-foreground text-background"
-                    : "bg-surface text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Icon size={18} strokeWidth={2.25} />
-              </button>
-            );
-          })}
-        </div>
+      {/* Icons — 5-col grid, vertical overflow when the list grows */}
+      <div className="grid max-h-48 grid-cols-5 gap-2 overflow-y-auto">
+        {ICON_LIST.map(({ name, Icon }) => {
+          const active = name === iconName;
+          return (
+            <button
+              key={name}
+              type="button"
+              onClick={() => {
+                hapticSelection();
+                onChange({ iconName: name, iconColor });
+              }}
+              aria-label={name}
+              aria-pressed={active}
+              className={`flex h-10 w-full items-center justify-center rounded-xl transition-colors active:scale-95 ${
+                active
+                  ? "bg-foreground text-background"
+                  : "bg-surface text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Icon size={18} strokeWidth={2.25} />
+            </button>
+          );
+        })}
       </div>
 
-      {/* Colours — single row of dots */}
-      <div className="flex gap-2">
+      {/* Colours — flex-wrap so a narrow Popover doesn't clip them */}
+      <div className="flex flex-wrap gap-2">
         {COLOR_LIST.map(({ id, bg, ring }) => {
           const active = id === iconColor;
           return (
