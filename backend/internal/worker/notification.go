@@ -245,31 +245,45 @@ func cancelButtonLabel(locale string) string {
 }
 
 // buildReminderText assembles the renewal-reminder Telegram message,
-// localized to the user's locale and folding the user's optional Note into
-// the line when present.
+// localized to the user's locale. The message is structured as a
+// multi-line card with clear visual hierarchy:
 //
-//	No note (ru): "💳 Напоминание: завтра спишется оплата за подписку *Netflix* — 15.49 USD."
-//	With note   : "💳 Напоминание: завтра спишется оплата за подписку *Netflix* (Для Кристины) — 15.49 USD."
+//	🔔 *Завтра списание по подписке*
 //
-// The note is escaped against the four characters legacy Markdown
-// (ParseMode: "Markdown") interprets, so a user typing "for *mom*" can't
-// break the bold formatting of the subscription name.
+//	🏷 *Netflix* _(Для Кристины)_
+//	💳 К оплате: *15.49 USD*
+//
+//	Выберите действие ниже:
+//
+// The note line renders in italic only when sub.Note is non-empty.
+// All user-supplied text is escaped for legacy Markdown safety.
 func buildReminderText(sub *model.Subscription, locale string) string {
+	escapedName := escapeTelegramMarkdown(sub.Name)
+
+	// Note: italic in legacy Markdown is _text_
 	notePart := ""
 	if n := strings.TrimSpace(sub.Note); n != "" {
-		notePart = " (" + escapeTelegramMarkdown(n) + ")"
+		notePart = " _(" + escapeTelegramMarkdown(n) + ")_"
 	}
+
+	amountStr := fmt.Sprintf("%.2f %s", sub.Amount, sub.Currency)
 
 	switch locale {
 	case "ru":
 		return fmt.Sprintf(
-			"💳 Напоминание: завтра спишется оплата за подписку *%s*%s — %.2f %s.",
-			sub.Name, notePart, sub.Amount, sub.Currency,
+			"🔔 *Завтра списание по подписке*\n\n"+
+				"🏷 *%s*%s\n"+
+				"💳 К оплате: *%s*\n\n"+
+				"Выберите действие ниже:",
+			escapedName, notePart, amountStr,
 		)
 	default:
 		return fmt.Sprintf(
-			"💳 Reminder: your *%s*%s subscription renews tomorrow — %.2f %s.",
-			sub.Name, notePart, sub.Amount, sub.Currency,
+			"🔔 *Subscription payment tomorrow*\n\n"+
+				"🏷 *%s*%s\n"+
+				"💳 Amount due: *%s*\n\n"+
+				"Choose an action below:",
+			escapedName, notePart, amountStr,
 		)
 	}
 }
