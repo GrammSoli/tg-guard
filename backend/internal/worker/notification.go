@@ -93,10 +93,7 @@ func (w *NotificationWorker) check(ctx context.Context) {
 			continue
 		}
 
-		text := fmt.Sprintf(
-			"💳 Reminder: your *%s* subscription (%.2f %s) renews tomorrow.",
-			sub.Name, sub.Amount, sub.Currency,
-		)
+		text := buildReminderText(&sub, sub.User.Locale)
 
 		if err := w.notifier.SendMessage(ctx, sub.User.TelegramID, text); err != nil {
 			log.Printf("[notification-worker] send to %d error: %v", sub.User.TelegramID, err)
@@ -130,6 +127,50 @@ func shouldSendNow(u *model.User, now time.Time) bool {
 	// just-elapsed tick window. Negative = too early; >tick = too late
 	// (will catch on next day or already sent and deduped via notified_at).
 	return delta >= 0 && delta < notificationTickInterval
+}
+
+// buildReminderText assembles the renewal-reminder Telegram message,
+// localized to the user's locale and folding the user's optional Note into
+// the line when present.
+//
+//	No note (ru): "💳 Напоминание: завтра спишется оплата за подписку *Netflix* — 15.49 USD."
+//	With note   : "💳 Напоминание: завтра спишется оплата за подписку *Netflix* (Для Кристины) — 15.49 USD."
+//
+// The note is escaped against the four characters legacy Markdown
+// (ParseMode: "Markdown") interprets, so a user typing "for *mom*" can't
+// break the bold formatting of the subscription name.
+func buildReminderText(sub *model.Subscription, locale string) string {
+	notePart := ""
+	if n := strings.TrimSpace(sub.Note); n != "" {
+		notePart = " (" + escapeTelegramMarkdown(n) + ")"
+	}
+
+	switch locale {
+	case "ru":
+		return fmt.Sprintf(
+			"💳 Напоминание: завтра спишется оплата за подписку *%s*%s — %.2f %s.",
+			sub.Name, notePart, sub.Amount, sub.Currency,
+		)
+	default:
+		return fmt.Sprintf(
+			"💳 Reminder: your *%s*%s subscription renews tomorrow — %.2f %s.",
+			sub.Name, notePart, sub.Amount, sub.Currency,
+		)
+	}
+}
+
+// escapeTelegramMarkdown escapes the characters that Telegram's legacy
+// Markdown parse mode interprets: * _ ` [ . Strict enough to keep the
+// subscription's bold name intact even if the user's note contains those.
+var telegramMarkdownReplacer = strings.NewReplacer(
+	"*", `\*`,
+	"_", `\_`,
+	"`", "\\`",
+	"[", `\[`,
+)
+
+func escapeTelegramMarkdown(s string) string {
+	return telegramMarkdownReplacer.Replace(s)
 }
 
 // parseHHMM parses an "HH:MM" string. Falls back to 10:00 on malformed input
