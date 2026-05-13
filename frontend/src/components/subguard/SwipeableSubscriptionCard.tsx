@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, type TouchEvent } from "react";
+import { useRef, useState, useCallback, useEffect, type TouchEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { Trash2 } from "lucide-react";
 import type { Subscription } from "@/types/subscription";
 import { SubscriptionCard } from "./SubscriptionCard";
@@ -86,6 +86,25 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
     velocity.current = 0;
   }, [open, deleting]);
 
+  // ── Mouse pointer support (desktop) ───────────────────────────────
+  const mouseActive = useRef(false);
+
+  const handleMouseDown = useCallback((e: ReactMouseEvent) => {
+    if (animating.current || deleting) return;
+    // Only left button
+    if (e.button !== 0) return;
+    e.preventDefault(); // prevent text selection drag
+    mouseActive.current = true;
+    startX.current = e.clientX;
+    startY.current = e.clientY;
+    currentX.current = open ? -SNAP_OPEN : 0;
+    isSwiping.current = true;
+    lockedAxis.current = null;
+    lastMoveTime.current = e.timeStamp;
+    lastMoveX.current = e.clientX;
+    velocity.current = 0;
+  }, [open, deleting]);
+
   const handleTouchMove = useCallback(
     (e: TouchEvent) => {
       if (!isSwiping.current) return;
@@ -142,6 +161,68 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
     } else {
       snapTo(0, () => setOpen(false));
     }
+  }, [open, snapTo]);
+
+  // ── Global mouse move/up (captured on window so drag works outside card) ──
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: globalThis.MouseEvent) => {
+      if (!mouseActive.current || !isSwiping.current) return;
+      const dx = e.clientX - startX.current;
+      const dy = e.clientY - startY.current;
+
+      if (!lockedAxis.current && (Math.abs(dx) > AXIS_LOCK_DISTANCE || Math.abs(dy) > AXIS_LOCK_DISTANCE)) {
+        lockedAxis.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      }
+
+      if (lockedAxis.current === "y") {
+        isSwiping.current = false;
+        mouseActive.current = false;
+        return;
+      }
+
+      if (lockedAxis.current === "x") {
+        const base = open ? -SNAP_OPEN : 0;
+        const raw = base + dx;
+        currentX.current = raw;
+        setOffset(clampOffset(raw));
+
+        const now = e.timeStamp;
+        const dt = now - lastMoveTime.current;
+        if (dt > 0) {
+          velocity.current = (lastMoveX.current - e.clientX) / dt;
+        }
+        lastMoveTime.current = now;
+        lastMoveX.current = e.clientX;
+      }
+    };
+
+    const handleGlobalMouseUp = () => {
+      if (!mouseActive.current) return;
+      mouseActive.current = false;
+      if (!isSwiping.current) return;
+      isSwiping.current = false;
+      lockedAxis.current = null;
+
+      const dist = -currentX.current;
+      const v = velocity.current;
+      const threshold = v > VELOCITY_THRESHOLD
+        ? Math.max(VELOCITY_REDUCED_DISTANCE, DISTANCE_THRESHOLD - v * 80)
+        : DISTANCE_THRESHOLD;
+
+      if (dist > threshold) {
+        snapTo(-SNAP_OPEN, () => setOpen(true));
+        if (!open) hapticImpact("light");
+      } else {
+        snapTo(0, () => setOpen(false));
+      }
+    };
+
+    window.addEventListener("mousemove", handleGlobalMouseMove);
+    window.addEventListener("mouseup", handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleGlobalMouseMove);
+      window.removeEventListener("mouseup", handleGlobalMouseUp);
+    };
   }, [open, snapTo]);
 
   const handleDeleteTap = useCallback(() => {
@@ -201,7 +282,7 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
         {/* Card layer */}
         <div
           ref={cardRef}
-          className="relative z-10 touch-pan-y"
+          className="relative z-10 touch-pan-y select-none cursor-grab active:cursor-grabbing"
           style={{
             transform: `translateX(${offset}px)`,
             transition: isSwiping.current ? "none" : SPRING_TRANSITION,
@@ -209,6 +290,7 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
+          onMouseDown={handleMouseDown}
         >
           <SubscriptionCard subscription={subscription} onClick={handleCardClick} />
         </div>
