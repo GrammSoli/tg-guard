@@ -4,6 +4,7 @@ import type { RoomSummary } from "@/types/room";
 import { formatCurrency, localeFor } from "@/lib/format";
 import { convertCurrency } from "@/lib/currencyRates";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useDragScroll } from "@/hooks/useDragScroll";
 import { ServiceLogo } from "./ServiceLogo";
 
 interface Props {
@@ -18,6 +19,7 @@ export function SharedRooms({ rooms, onViewAll, onOpen, onCreateRoom }: Props) {
   const lc = localeFor(i18n.language);
   const { settings } = useSettingsStore();
   const userCurrency = settings.defaultCurrency;
+  const dragScrollRef = useDragScroll<HTMLDivElement>();
 
   return (
     <section className="mt-6">
@@ -33,7 +35,10 @@ export function SharedRooms({ rooms, onViewAll, onOpen, onCreateRoom }: Props) {
         </button>
       </div>
 
-      <div className="flex space-x-3 overflow-x-auto px-5 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        ref={dragScrollRef}
+        className="no-scrollbar flex space-x-3 overflow-x-auto px-5 pb-3 select-none cursor-grab active:cursor-grabbing"
+      >
         {/* Create room card */}
         <button
           onClick={onCreateRoom}
