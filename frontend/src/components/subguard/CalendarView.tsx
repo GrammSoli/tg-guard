@@ -4,7 +4,49 @@ import type { Subscription } from "@/types/subscription";
 import { localeFor } from "@/lib/format";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SubscriptionCard } from "./SubscriptionCard";
-import { brandColorFor } from "@/lib/brandLogo";
+import { ServiceLogo } from "./ServiceLogo";
+import { COLOR_MAP, ICON_MAP } from "@/lib/customIcons";
+
+/** Max number of full icons rendered per day cell before falling back to a
+ *  "+N" overflow chip. Two keeps the row narrow inside the cell. */
+const CALENDAR_ICON_LIMIT = 2;
+
+/**
+ * MiniSubIcon — single 16-px subscription avatar for the calendar cell.
+ * Mirrors BrandIcon's branching at a smaller scale:
+ *   - custom sub (Brand === "default") with a saved icon_name + icon_color
+ *     → coloured circle + lucide glyph at 10 px
+ *   - everything else (real brand / no custom assets) → ServiceLogo, which
+ *     itself falls back to a gradient letter avatar
+ * Both variants get a 2-px background-coloured ring so adjacent overlapped
+ * icons read as separate tiles, the same trick AvatarGroup uses on the
+ * shared-room cards.
+ */
+function MiniSubIcon({ sub }: { sub: Subscription }) {
+  if (sub.brand === "default" && sub.icon_name && sub.icon_color) {
+    const Icon = ICON_MAP[sub.icon_name];
+    const colour = COLOR_MAP[sub.icon_color];
+    if (Icon && colour) {
+      return (
+        <span
+          aria-hidden="true"
+          className={`flex h-4 w-4 items-center justify-center rounded-full ring-2 ring-background ${colour.bg}`}
+        >
+          <Icon size={10} strokeWidth={2.5} className="text-white" />
+        </span>
+      );
+    }
+  }
+  return (
+    <ServiceLogo
+      brand={sub.brand}
+      name={sub.name}
+      size={16}
+      rounded="full"
+      className="ring-2 ring-background"
+    />
+  );
+}
 
 interface Props {
   subscriptions: Subscription[];
@@ -130,16 +172,22 @@ export function CalendarView({ subscriptions, onEdit }: Props) {
                   {d}
                 </span>
                 {dayBills.length > 0 && (
-                  <div className="flex items-center justify-center gap-0.5">
-                    {dayBills.slice(0, 3).map((s) => (
+                  <div className="flex items-center justify-center">
+                    {dayBills.slice(0, CALENDAR_ICON_LIMIT).map((s, idx) => (
                       <span
                         key={s.id}
-                        className="inline-block h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: brandColorFor(s.brand) }}
-                      />
+                        className={idx > 0 ? "-ml-1" : ""}
+                      >
+                        <MiniSubIcon sub={s} />
+                      </span>
                     ))}
-                    {dayBills.length > 3 && (
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+                    {dayBills.length > CALENDAR_ICON_LIMIT && (
+                      <span
+                        aria-hidden="true"
+                        className="bg-muted text-muted-foreground ring-2 ring-background -ml-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[8px] font-bold leading-none"
+                      >
+                        +{dayBills.length - CALENDAR_ICON_LIMIT}
+                      </span>
                     )}
                   </div>
                 )}
