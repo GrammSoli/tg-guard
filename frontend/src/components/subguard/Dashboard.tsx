@@ -13,18 +13,15 @@ import { useTelegramBackButton } from "@/hooks/use-telegram-back";
 import { useTranslation } from "react-i18next";
 import { SummaryHeader } from "./SummaryHeader";
 import { FilterBar } from "./FilterBar";
-import { FilterSheet } from "./FilterSheet";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { SwipeableSubscriptionCard } from "./SwipeableSubscriptionCard";
 import { PartnerOffers } from "./PartnerOffers";
 import { TabBar, type TabKey } from "./TabBar";
-import { AddSubscriptionSheet } from "./AddSubscriptionSheet";
+
 import { AnalyticsView } from "./AnalyticsView";
 import { CalendarView } from "./CalendarView";
 import { SettingsView } from "./SettingsView";
 import { SharedRooms } from "./SharedRooms";
-import { SharedRoomSheet } from "./SharedRoomSheet";
-import { CreateRoomSheet } from "./CreateRoomSheet";
 import { OnboardingSheet } from "./OnboardingSheet";
 import { EmptyDashboard } from "./EmptyDashboard";
 import {
@@ -37,6 +34,7 @@ import {
 import { useSubscriptionStore } from "@/stores/subscriptionStore";
 import { useRoomStore } from "@/stores/roomStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useModalStore } from "@/stores/modalStore";
 
 interface Props {
   partnerOffers: PartnerOffer[];
@@ -53,29 +51,34 @@ export function Dashboard({ partnerOffers, user }: Props) {
   const sortBy = useSubscriptionStore((s) => s.sortBy);
   const filterTypes = useSubscriptionStore((s) => s.filterTypes);
   const filterCategories = useSubscriptionStore((s) => s.filterCategories);
-  const addSubscription = useSubscriptionStore((s) => s.addSubscription);
-  const updateSubscription = useSubscriptionStore((s) => s.updateSubscription);
   const deleteSubscription = useSubscriptionStore((s) => s.deleteSubscription);
   const rooms = useRoomStore((s) => s.rooms);
   const fetchRooms = useRoomStore((s) => s.fetchRooms);
-  const fetchDetail = useRoomStore((s) => s.fetchDetail);
 
-  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  // Global modal state
+  const openRoom = useModalStore((s) => s.openRoom);
+  const closeRoom = useModalStore((s) => s.closeRoom);
+  const activeRoomId = useModalStore((s) => s.activeRoomId);
+  const openCreateRoom = useModalStore((s) => s.openCreateRoom);
+  const closeCreateRoom = useModalStore((s) => s.closeCreateRoom);
+  const createRoomOpen = useModalStore((s) => s.createRoomOpen);
+  const openAddSub = useModalStore((s) => s.openAddSub);
+  const closeAddSub = useModalStore((s) => s.closeAddSub);
+  const addSubOpen = useModalStore((s) => s.addSubOpen);
+  const openFilter = useModalStore((s) => s.openFilter);
+  const closeFilter = useModalStore((s) => s.closeFilter);
+  const filterOpen = useModalStore((s) => s.filterOpen);
 
   const [loading, setLoading] = useState(true);
   const { t } = useTranslation();
   const navigate = useNavigate();
 
   const [tab, setTab] = useState<TabKey>("dashboard");
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [editing, setEditing] = useState<Subscription | null>(null);
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
-  const [createRoomOpen, setCreateRoomOpen] = useState(false);
 
   // Handle Telegram deep link — auto-open room after join
   useDeepLinkHandler(useCallback((roomId: string) => {
-    setActiveRoomId(roomId);
-  }, []));
+    openRoom(roomId);
+  }, [openRoom]));
 
   // Init Telegram + fetch rooms on mount
   useEffect(() => {
@@ -85,29 +88,25 @@ export function Dashboard({ partnerOffers, user }: Props) {
     return () => clearTimeout(timer);
   }, [fetchRooms]);
 
-  // When a room is selected, fetch its details
-  useEffect(() => {
-    if (activeRoomId) fetchDetail(activeRoomId);
-  }, [activeRoomId, fetchDetail]);
+  // Room detail fetching is handled by GlobalModals
 
   // Show Telegram BackButton when not on dashboard tab, or when a sheet is open
-  const isSubPage = tab !== "dashboard" || sheetOpen || !!activeRoomId || createRoomOpen;
+  const isSubPage = tab !== "dashboard" || addSubOpen || !!activeRoomId || createRoomOpen;
   const handleBack = useCallback(() => {
-    if (sheetOpen) {
-      setSheetOpen(false);
-      setEditing(null);
+    if (addSubOpen) {
+      closeAddSub();
       hapticImpact("light");
     } else if (createRoomOpen) {
-      setCreateRoomOpen(false);
+      closeCreateRoom();
       hapticImpact("light");
     } else if (activeRoomId) {
-      setActiveRoomId(null);
+      closeRoom();
       hapticImpact("light");
     } else if (tab !== "dashboard") {
       setTab("dashboard");
       hapticImpact("light");
     }
-  }, [sheetOpen, createRoomOpen, activeRoomId, tab]);
+  }, [addSubOpen, closeAddSub, createRoomOpen, closeCreateRoom, activeRoomId, closeRoom, tab]);
 
   useTelegramBackButton(isSubPage, handleBack);
 
@@ -185,40 +184,22 @@ export function Dashboard({ partnerOffers, user }: Props) {
     [items, settings.defaultCurrency],
   );
 
-  const handleSave = async (data: Omit<Subscription, "id"> & { id?: string }) => {
-    try {
-      if (data.id) {
-        await updateSubscription(data.id, data);
-      } else {
-        await addSubscription(data as Omit<Subscription, "id">);
-      }
-      setEditing(null);
-      hapticNotification("success");
-    } catch {
-      hapticNotification("error");
-    }
+  const openAdd = () => {
+    openAddSub(null);
+    hapticImpact("medium");
+  };
+  const openEdit = (s: Subscription) => {
+    openAddSub(s as unknown as Record<string, unknown>);
+    hapticImpact("light");
   };
 
   const handleDelete = async (id: string) => {
     try {
       await deleteSubscription(id);
-      setSheetOpen(false);
-      setEditing(null);
       hapticNotification("warning");
     } catch {
       hapticNotification("error");
     }
-  };
-
-  const openAdd = () => {
-    setEditing(null);
-    setSheetOpen(true);
-    hapticImpact("medium");
-  };
-  const openEdit = (s: Subscription) => {
-    setEditing(s);
-    setSheetOpen(true);
-    hapticImpact("light");
   };
 
   const handleTabChange = (newTab: TabKey) => {
@@ -228,13 +209,13 @@ export function Dashboard({ partnerOffers, user }: Props) {
 
   const handleViewAllRooms = useCallback(() => navigate({ to: "/rooms" }), [navigate]);
   const handleOpenRoom = useCallback((r: RoomSummary) => {
-    setActiveRoomId(r.id);
+    openRoom(r.id);
     hapticImpact("light");
-  }, []);
+  }, [openRoom]);
   const handleCreateRoom = useCallback(() => {
-    setCreateRoomOpen(true);
+    openCreateRoom();
     hapticImpact("medium");
-  }, []);
+  }, [openCreateRoom]);
 
   return (
     <>
@@ -274,7 +255,7 @@ export function Dashboard({ partnerOffers, user }: Props) {
                     <FilterBar
                       value={filter}
                       onChange={setFilter}
-                      onOpenFilters={() => setFilterSheetOpen(true)}
+                      onOpenFilters={() => openFilter()}
                     />
                   </div>
                   {showSubscriptions && (
@@ -330,35 +311,6 @@ export function Dashboard({ partnerOffers, user }: Props) {
         />
 
         <OnboardingSheet />
-
-        <AddSubscriptionSheet
-          open={sheetOpen}
-          onOpenChange={setSheetOpen}
-          initial={editing}
-          onSave={handleSave}
-          onDelete={undefined}
-        />
-
-        <SharedRoomSheet
-          roomId={activeRoomId}
-          open={!!activeRoomId}
-          onOpenChange={(o) => {
-            if (!o) {
-              setActiveRoomId(null);
-              hapticImpact("light");
-            }
-          }}
-        />
-
-        <CreateRoomSheet
-          open={createRoomOpen}
-          onOpenChange={setCreateRoomOpen}
-        />
-
-        <FilterSheet
-          open={filterSheetOpen}
-          onOpenChange={setFilterSheetOpen}
-        />
       </div>
     </>
   );

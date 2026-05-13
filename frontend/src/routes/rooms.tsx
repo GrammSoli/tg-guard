@@ -4,10 +4,9 @@ import { useTranslation } from "react-i18next";
 import { ArrowLeft, ArrowUpDown, Plus, Search, Users, X } from "lucide-react";
 import { useRoomStore } from "@/stores/roomStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useModalStore } from "@/stores/modalStore";
 import { formatCurrency, localeFor } from "@/lib/format";
 import { convertCurrency } from "@/lib/currencyRates";
-import { SharedRoomSheet } from "@/components/subguard/SharedRoomSheet";
-import { CreateRoomSheet } from "@/components/subguard/CreateRoomSheet";
 import { SwipeableRoomCard } from "@/components/subguard/SwipeableRoomCard";
 import { hapticImpact } from "@/lib/telegram";
 
@@ -31,10 +30,10 @@ function RoomsPage() {
   const lc = localeFor(i18n.language);
   const { rooms, fetchRooms, deleteRoom } = useRoomStore();
   const { settings } = useSettingsStore();
+  const openRoom = useModalStore((s) => s.openRoom);
+  const openCreateRoom = useModalStore((s) => s.openCreateRoom);
   const userCurrency = settings.defaultCurrency;
   const navigate = useNavigate();
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>(() => {
     if (typeof window === "undefined") return "name";
@@ -89,7 +88,7 @@ function RoomsPage() {
         <button
           onClick={() => {
             hapticImpact("medium");
-            setCreateOpen(true);
+            openCreateRoom();
           }}
           className="bg-primary/15 hover:bg-primary/25 flex h-9 w-9 items-center justify-center rounded-full text-primary transition-colors"
           aria-label="Create room"
@@ -160,7 +159,7 @@ function RoomsPage() {
               {t("rooms.noRoomsHint")}
             </p>
             <button
-              onClick={() => setCreateOpen(true)}
+              onClick={() => openCreateRoom()}
               className="bg-primary text-primary-foreground hover:bg-primary/90 mt-2 rounded-full px-4 py-2 text-xs font-semibold transition-colors"
             >
               {t("createRoom.create")}
@@ -186,7 +185,7 @@ function RoomsPage() {
                 room={room}
                 displayAmount={displayAmount}
                 userCurrency={userCurrency}
-                onClick={(id) => setActiveRoomId(id)}
+                onClick={(id) => openRoom(id)}
                 onDelete={(id) => deleteRoom(id)}
               />
             );
@@ -194,14 +193,6 @@ function RoomsPage() {
         )}
       </section>
 
-      <SharedRoomSheet
-        roomId={activeRoomId}
-        open={!!activeRoomId}
-        onOpenChange={(o) => {
-          if (!o) setActiveRoomId(null);
-        }}
-      />
-      <CreateRoomSheet open={createOpen} onOpenChange={setCreateOpen} />
 
       <Link to="/" className="sr-only">
         Home
