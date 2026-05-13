@@ -56,6 +56,7 @@ export function SwipeableRoomCard({ room, displayAmount, userCurrency, onClick, 
   }, [swipe]);
 
   const handleCardClick = useCallback(() => {
+    if (swipe.didDrag) return;
     if (swipe.isOpen) {
       swipe.close();
       return;
