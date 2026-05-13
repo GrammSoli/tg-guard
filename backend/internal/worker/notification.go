@@ -215,25 +215,37 @@ func renewKeyboard(sub *model.Subscription, locale string) *models.InlineKeyboar
 	return &models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{{
 			{
-				Text:         renewButtonLabel(locale),
+				Text:         renewButtonLabel(locale, sub.IsTrial),
 				CallbackData: tgutil.RenewCallbackPrefix + sub.ID.String(),
 			},
 			{
-				Text:         cancelButtonLabel(locale),
+				Text:         cancelButtonLabel(locale, sub.IsTrial),
 				CallbackData: tgutil.CancelCallbackPrefix + sub.ID.String(),
 			},
 		}},
 	}
 }
 
-func renewButtonLabel(locale string) string {
+func renewButtonLabel(locale string, isTrial bool) string {
+	if isTrial {
+		if locale == "ru" {
+			return "✅ Оставить (Платная)"
+		}
+		return "✅ Keep (Paid)"
+	}
 	if locale == "ru" {
 		return "✅ Оплачено"
 	}
 	return "✅ Paid"
 }
 
-func cancelButtonLabel(locale string) string {
+func cancelButtonLabel(locale string, isTrial bool) string {
+	if isTrial {
+		if locale == "ru" {
+			return "❌ Отменил триал"
+		}
+		return "❌ Cancelled trial"
+	}
 	if locale == "ru" {
 		return "❌ Отменил"
 	}
@@ -264,6 +276,10 @@ func buildReminderText(sub *model.Subscription, locale string) string {
 
 	amountStr := fmt.Sprintf("%.2f %s", sub.Amount, sub.Currency)
 
+	if sub.IsTrial {
+		return buildTrialReminderText(escapedName, notePart, amountStr, locale)
+	}
+
 	switch locale {
 	case "ru":
 		return fmt.Sprintf(
@@ -280,6 +296,27 @@ func buildReminderText(sub *model.Subscription, locale string) string {
 				"💳 Amount due: *%s*\n\n"+
 				"Choose an action below:",
 			escapedName, notePart, amountStr,
+		)
+	}
+}
+
+func buildTrialReminderText(name, notePart, amountStr, locale string) string {
+	switch locale {
+	case "ru":
+		return fmt.Sprintf(
+			"❗ *Завтра заканчивается пробный период!*\n\n"+
+				"🏷 *%s*%s\n"+
+				"💳 Будет списано: *%s*\n\n"+
+				"Выберите действие ниже:",
+			name, notePart, amountStr,
+		)
+	default:
+		return fmt.Sprintf(
+			"❗ *Trial period ends tomorrow!*\n\n"+
+				"🏷 *%s*%s\n"+
+				"💳 Will be charged: *%s*\n\n"+
+				"Choose an action below:",
+			name, notePart, amountStr,
 		)
 	}
 }
