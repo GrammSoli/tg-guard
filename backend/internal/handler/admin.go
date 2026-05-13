@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -16,6 +15,7 @@ import (
 	"github.com/subguard/backend/internal/middleware"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/repository"
+	"github.com/subguard/backend/internal/workerutil"
 )
 
 // AdminHandler handles all admin-panel endpoints.
@@ -153,7 +153,9 @@ func (h *AdminHandler) Broadcast(c fiber.Ctx) error {
 	var count int64
 	h.db.Model(&model.User{}).Count(&count)
 
-	go h.runBroadcast(body.TextRU, body.TextEN, body.ImageURL)
+	go workerutil.Supervise("broadcast", func() {
+		h.runBroadcast(body.TextRU, body.TextEN, body.ImageURL)
+	})
 
 	return c.JSON(fiber.Map{
 		"status":     "queued",
@@ -209,11 +211,16 @@ func (h *AdminHandler) runBroadcast(textRU, textEN, imageURL string) {
 	log.Printf("[broadcast] finished: %d sent, %d failed", sent, failed)
 }
 
-// sendOne performs a single Telegram send with a bounded timeout and a
-// retry on 429 (Too Many Requests) using the retry_after the API returns.
-// Returns true on success.
+// sendOne performs a single Telegram send with a bounded per-call timeout
+// and a retry_after-aware back-off on 429. Returns true on success.
+//
+// Behaviour on 429: parse the retry_after seconds the Telegram API embeds
+// in the error message ("Too Many Requests: retry after 17") via
+// workerutil.ParseRetryAfter, sleep that long, then retry — up to two
+// retries. If retry_after is missing or unparseable, fall back to 1s.
 func (h *AdminHandler) sendOne(parent context.Context, chatID int64, text, imageURL string) bool {
-	for attempt := 0; attempt < 2; attempt++ {
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		sendCtx, cancel := context.WithTimeout(parent, 10*time.Second)
 		var err error
 		if imageURL != "" {
@@ -236,19 +243,25 @@ func (h *AdminHandler) sendOne(parent context.Context, chatID int64, text, image
 			return true
 		}
 
-		// Detect "Too Many Requests; retry after N" — the go-telegram client
-		// surfaces it as a plain error containing the phrase. Back off and try
-		// once more before giving up on this user.
-		if msg := err.Error(); strings.Contains(strings.ToLower(msg), "too many requests") {
+		// 429 path: respect the retry_after hint when present, else fall
+		// back to 1s. Don't sleep on the last attempt — it's pointless.
+		if workerutil.IsRateLimit(err) && attempt < maxAttempts-1 {
+			delay, ok := workerutil.ParseRetryAfter(err)
+			if !ok {
+				delay = time.Second
+			}
+			log.Printf("[broadcast] 429 for chat %d, sleeping %s (attempt %d/%d)",
+				chatID, delay, attempt+1, maxAttempts)
 			select {
 			case <-parent.Done():
 				return false
-			case <-time.After(time.Second):
+			case <-time.After(delay):
 			}
 			continue
 		}
 
-		log.Printf("[broadcast] failed to send to %d: %v", chatID, err)
+		log.Printf("[broadcast] failed to send to %d (attempt %d): %v",
+			chatID, attempt+1, err)
 		return false
 	}
 	return false
