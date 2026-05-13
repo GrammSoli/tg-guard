@@ -206,7 +206,7 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
                 key={s.id}
                 className="bg-surface flex items-center gap-3 rounded-2xl p-3"
               >
-                <BrandIcon brand={s.brand} size="sm" />
+                <BrandIcon brand={s.brand} size="sm" iconName={s.icon_name} iconColor={s.icon_color} />
                 <div className="flex-1">
                   <p className="text-sm font-semibold">{s.name}</p>
                   <p className="text-xs text-muted-foreground">

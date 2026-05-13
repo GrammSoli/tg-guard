@@ -43,6 +43,13 @@ type Subscription struct {
 	// Note is a freeform user-supplied tag to distinguish duplicate
 	// subscriptions ("Netflix — parents", "Netflix — work"). Optional.
 	Note          string     `gorm:"size:128" json:"note,omitempty"`
+	// IconName / IconColor are only meaningful for custom subscriptions
+	// (Brand == "default"). The frontend's icon registry maps the string
+	// name to a lucide-react icon component; unknown names fall back to
+	// the letter-avatar placeholder. Storing as plain strings keeps the
+	// backend agnostic about the React-side allow-list.
+	IconName      string     `gorm:"size:32" json:"icon_name,omitempty"`
+	IconColor     string     `gorm:"size:16" json:"icon_color,omitempty"`
 	Amount        float64    `gorm:"not null" json:"amount"`
 	Currency      string     `gorm:"default:USD;size:3" json:"currency"`
 	Period        string     `gorm:"default:monthly;size:10" json:"period"` // monthly | yearly | weekly

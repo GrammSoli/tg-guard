@@ -37,7 +37,7 @@ export function SubscriptionCard({ subscription, onClick }: Props) {
       onClick={() => onClick?.(s)}
       className="bg-surface group flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-transform active:scale-[0.98]"
     >
-      <BrandIcon brand={s.brand} />
+      <BrandIcon brand={s.brand} iconName={s.icon_name} iconColor={s.icon_color} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className="truncate text-[15px] font-semibold">

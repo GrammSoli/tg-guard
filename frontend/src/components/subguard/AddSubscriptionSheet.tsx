@@ -12,6 +12,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { categoryKey } from "@/lib/categoryKey";
+import { DEFAULT_ICON_COLOR, DEFAULT_ICON_NAME } from "@/lib/customIcons";
+import { IconPicker } from "./IconPicker";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +63,10 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
   const [isTrial, setIsTrial] = useState(false);
   const [trialEnd, setTrialEnd] = useState(todayIso());
   const [autoPay, setAutoPay] = useState(true);
+  // Custom-subscription appearance. Only sent to the API when brand
+  // resolves to "default" (i.e. it's actually a custom sub).
+  const [iconName, setIconName] = useState<string>(DEFAULT_ICON_NAME);
+  const [iconColor, setIconColor] = useState<string>(DEFAULT_ICON_COLOR);
 
   useEffect(() => {
     if (!open) return;
@@ -70,6 +76,8 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       setBrand(initial.brand);
       setTag(initial.tag ?? "");
       setNote(initial.note ?? "");
+      setIconName(initial.icon_name ?? DEFAULT_ICON_NAME);
+      setIconColor(initial.icon_color ?? DEFAULT_ICON_COLOR);
       setAmount(String(initial.amount));
       setCurrency(initial.currency);
       setPeriod(initial.period);
@@ -83,6 +91,8 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       setBrand("default");
       setTag("");
       setNote("");
+      setIconName(DEFAULT_ICON_NAME);
+      setIconColor(DEFAULT_ICON_COLOR);
       setAmount("9.99");
       setCurrency("USD");
       setPeriod("monthly");
@@ -109,12 +119,18 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
   };
 
   const handleSave = () => {
+    const isCustom = brand === "default";
     onSave({
       id: initial?.id,
       name: name.trim() || t("modal.untitled"),
       brand,
       tag: tag.trim() || undefined,
       note: note.trim() || undefined,
+      // Only emit icon fields for custom subscriptions. Real brand logos
+      // ignore them, so sending the user's picker selection along would
+      // just be noise in the DB.
+      icon_name: isCustom ? iconName : undefined,
+      icon_color: isCustom ? iconColor : undefined,
       amount: parseFloat(amount) || 0,
       currency,
       period,
@@ -151,7 +167,7 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
               onClick={() => setStep("catalog")}
               className="bg-surface flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-transform active:scale-[0.99]"
             >
-              <BrandIcon brand={brand} />
+              <BrandIcon brand={brand} iconName={iconName} iconColor={iconColor} />
               <div className="flex-1">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {t("modal.selectedService")}
@@ -167,13 +183,24 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
             </button>
 
             {brand === "default" && (
-              <Field label={t("modal.customName")}>
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={t("modal.serviceNamePh")}
+              <>
+                <Field label={t("modal.customName")}>
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={t("modal.serviceNamePh")}
+                  />
+                </Field>
+
+                <IconPicker
+                  iconName={iconName}
+                  iconColor={iconColor}
+                  onChange={({ iconName: n, iconColor: c }) => {
+                    setIconName(n);
+                    setIconColor(c);
+                  }}
                 />
-              </Field>
+              </>
             )}
 
             <div className="grid grid-cols-3 gap-3">

@@ -56,6 +56,11 @@ export interface Subscription {
   trial_ends_at: string | null;
   is_auto_pay: boolean;
   logoUrl?: string;
+  /** Custom-subscription appearance. Only honoured when `brand === "default"`.
+   *  Name is one of the allow-listed lucide icons in `lib/customIcons.ts`.
+   *  Colour is an id from `COLOR_LIST` (e.g. "blue", "emerald"). */
+  icon_name?: string;
+  icon_color?: string;
 }
 
 export interface PartnerOffer {
