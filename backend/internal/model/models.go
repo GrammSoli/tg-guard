@@ -40,6 +40,9 @@ type Subscription struct {
 	Name          string     `gorm:"not null;size:100" json:"name"`
 	Brand         string     `gorm:"default:default;size:32" json:"brand"`
 	Tag           string     `gorm:"size:64" json:"tag,omitempty"`
+	// Note is a freeform user-supplied tag to distinguish duplicate
+	// subscriptions ("Netflix — parents", "Netflix — work"). Optional.
+	Note          string     `gorm:"size:128" json:"note,omitempty"`
 	Amount        float64    `gorm:"not null" json:"amount"`
 	Currency      string     `gorm:"default:USD;size:3" json:"currency"`
 	Period        string     `gorm:"default:monthly;size:10" json:"period"` // monthly | yearly | weekly

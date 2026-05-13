@@ -45,6 +45,9 @@ export interface Subscription {
   name: string;
   brand: BrandKey;
   tag?: string;
+  /** Freeform user-supplied note to distinguish duplicates ("for family",
+   *  "work card"). Shown muted next to the subscription name on the card. */
+  note?: string;
   amount: number;
   currency: string; // ISO 4217: USD, RUB, EUR, GBP, KZT
   period: BillingPeriod;

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { categoryKey } from "@/lib/categoryKey";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,6 +53,7 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
   const [name, setName] = useState("");
   const [brand, setBrand] = useState<BrandKey>("default");
   const [tag, setTag] = useState("");
+  const [note, setNote] = useState("");
   const [amount, setAmount] = useState("9.99");
   const [currency, setCurrency] = useState("USD");
   const [period, setPeriod] = useState<BillingPeriod>("monthly");
@@ -67,6 +69,7 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       setName(initial.name);
       setBrand(initial.brand);
       setTag(initial.tag ?? "");
+      setNote(initial.note ?? "");
       setAmount(String(initial.amount));
       setCurrency(initial.currency);
       setPeriod(initial.period);
@@ -79,6 +82,7 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       setName("");
       setBrand("default");
       setTag("");
+      setNote("");
       setAmount("9.99");
       setCurrency("USD");
       setPeriod("monthly");
@@ -110,6 +114,7 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       name: name.trim() || t("modal.untitled"),
       brand,
       tag: tag.trim() || undefined,
+      note: note.trim() || undefined,
       amount: parseFloat(amount) || 0,
       currency,
       period,
@@ -229,11 +234,20 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
                 <SelectContent>
                   {SERVICE_CATEGORIES.map((c) => (
                     <SelectItem key={c} value={c}>
-                      {c}
+                      {t(categoryKey(c))}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+            </Field>
+
+            <Field label={t("modal.note")}>
+              <Input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder={t("modal.notePh")}
+                maxLength={128}
+              />
             </Field>
 
             <Row

@@ -50,16 +50,17 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 	}
 
 	var body struct {
-		Name          string     `json:"name"`
-		Brand         string     `json:"brand"`
-		Tag           string     `json:"tag"`
-		Amount        float64    `json:"amount"`
-		Currency      string     `json:"currency"`
-		Period        string     `json:"period"`
-		NextPaymentAt string     `json:"next_payment_at"`
-		IsTrial       bool       `json:"is_trial"`
-		TrialEndsAt   *string    `json:"trial_ends_at"`
-		IsAutoPay     bool       `json:"is_auto_pay"`
+		Name          string  `json:"name"`
+		Brand         string  `json:"brand"`
+		Tag           string  `json:"tag"`
+		Note          string  `json:"note"`
+		Amount        float64 `json:"amount"`
+		Currency      string  `json:"currency"`
+		Period        string  `json:"period"`
+		NextPaymentAt string  `json:"next_payment_at"`
+		IsTrial       bool    `json:"is_trial"`
+		TrialEndsAt   *string `json:"trial_ends_at"`
+		IsAutoPay     bool    `json:"is_auto_pay"`
 	}
 	if err := c.Bind().JSON(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
@@ -82,6 +83,7 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 		Name:          body.Name,
 		Brand:         defaultStr(body.Brand, "default"),
 		Tag:           body.Tag,
+		Note:          body.Note,
 		Amount:        body.Amount,
 		Currency:      defaultStr(body.Currency, "USD"),
 		Period:        defaultStr(body.Period, "monthly"),
@@ -137,6 +139,9 @@ func (h *SubscriptionHandler) Update(c fiber.Ctx) error {
 	}
 	if v, ok := body["tag"].(string); ok {
 		sub.Tag = v
+	}
+	if v, ok := body["note"].(string); ok {
+		sub.Note = v
 	}
 	if v, ok := body["amount"].(float64); ok {
 		sub.Amount = v
