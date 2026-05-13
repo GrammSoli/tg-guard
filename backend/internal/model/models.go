@@ -34,9 +34,16 @@ type User struct {
 
 // Subscription represents a user's tracked subscription.
 type Subscription struct {
-	ID            uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	UserID        uint       `gorm:"index:idx_sub_user_payment,priority:1;not null" json:"-"`
-	User          User       `gorm:"foreignKey:UserID" json:"-"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	// UserID carries both a single-column index (for "list a user's subs"
+	// queries) AND participates in the composite idx_sub_user_payment used
+	// by the per-user-on-day worker scan path.
+	UserID uint `gorm:"index;not null" json:"-"`
+	// CASCADE so that DELETE FROM users transparently wipes their subs at
+	// the DB layer — the explicit handler.DeleteMe still runs the same
+	// cleanup in a transaction, this is defence in depth against direct
+	// SQL writes / future admin scripts.
+	User User `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE" json:"-"`
 	Name          string     `gorm:"not null;size:100" json:"name"`
 	Brand         string     `gorm:"default:default;size:32" json:"brand"`
 	Tag           string     `gorm:"size:64" json:"tag,omitempty"`
@@ -51,9 +58,9 @@ type Subscription struct {
 	IconName      string     `gorm:"size:32" json:"icon_name,omitempty"`
 	IconColor     string     `gorm:"size:16" json:"icon_color,omitempty"`
 	Amount        float64    `gorm:"not null" json:"amount"`
-	Currency      string     `gorm:"default:USD;size:3" json:"currency"`
-	Period        string     `gorm:"default:monthly;size:10" json:"period"` // monthly | yearly | weekly
-	NextPaymentAt time.Time  `gorm:"index;index:idx_sub_user_payment,priority:2;not null" json:"next_payment_at"`
+	Currency      string     `gorm:"default:USD;size:3;not null" json:"currency"`
+	Period        string     `gorm:"default:monthly;size:10;not null" json:"period"` // monthly | yearly | weekly
+	NextPaymentAt time.Time  `gorm:"index;not null" json:"next_payment_at"`
 	IsTrial       bool       `gorm:"default:false" json:"is_trial"`
 	TrialEndsAt   *time.Time `json:"trial_ends_at"`
 	IsAutoPay     bool       `gorm:"default:true" json:"is_auto_pay"`
@@ -72,8 +79,11 @@ type SharedRoom struct {
 	BillingDay     int           `gorm:"default:1" json:"billing_day"`
 	LastRemindedAt *time.Time    `json:"last_reminded_at,omitempty"`
 	CreatedAt      time.Time     `json:"created_at"`
-	Services       []RoomService `gorm:"foreignKey:RoomID" json:"services"`
-	Members        []RoomMember  `gorm:"foreignKey:RoomID" json:"members"`
+	// CASCADE so DELETE FROM shared_rooms cleans up children at DB layer.
+	// handler.DeleteRoom still wraps the manual deletes in a transaction;
+	// this is defence in depth against direct SQL writes.
+	Services []RoomService `gorm:"foreignKey:RoomID;constraint:OnDelete:CASCADE" json:"services"`
+	Members  []RoomMember  `gorm:"foreignKey:RoomID;constraint:OnDelete:CASCADE" json:"members"`
 }
 
 // RoomService is a subscription service attached to a shared room.
@@ -91,13 +101,22 @@ type RoomService struct {
 }
 
 // RoomMember links a user to a shared room with payment status.
+//
+// Indexing notes:
+//   - The (RoomID, UserID) composite PK indexes "list members of room X"
+//     queries (PK starts with RoomID).
+//   - UserID gets its own non-unique index so the reverse direction —
+//     "list rooms user X is in" / "delete all memberships of user X" —
+//     doesn't seq-scan.
+//   - HasPaid + RoomID composite covers the billing-reset worker query
+//     `WHERE room_id = ? AND has_paid = false`.
 type RoomMember struct {
-	RoomID   uuid.UUID  `gorm:"type:uuid;primaryKey" json:"-"`
-	UserID   uint       `gorm:"primaryKey" json:"user_id"`
+	RoomID   uuid.UUID  `gorm:"type:uuid;primaryKey;index:idx_rm_room_paid,priority:1" json:"-"`
+	UserID   uint       `gorm:"primaryKey;index" json:"user_id"`
 	Name     string     `gorm:"size:100" json:"name"`
 	Username string     `gorm:"size:64" json:"username,omitempty"`
 	Avatar   string     `gorm:"size:512" json:"avatar,omitempty"`
-	HasPaid  bool       `gorm:"index;default:false" json:"has_paid"`
+	HasPaid  bool       `gorm:"index:idx_rm_room_paid,priority:2;default:false" json:"has_paid"`
 	PaidAt   *time.Time `json:"paid_at,omitempty"`
 }
 

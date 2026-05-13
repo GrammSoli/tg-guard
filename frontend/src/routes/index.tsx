@@ -14,12 +14,15 @@ function Index() {
   const { fetchSubscriptions } = useSubscriptionStore();
   const { fetchRooms } = useRoomStore();
 
-  // Load all data on mount
+  // Load all data on mount. Zustand action refs are stable but listing
+  // them in deps trips HMR / strict-mode into double-fetching; we want
+  // a single boot fetch, hence the empty deps array.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     fetchProfile();
     fetchSubscriptions();
     fetchRooms();
-  }, [fetchProfile, fetchSubscriptions, fetchRooms]);
+  }, []);
 
   return (
     <Dashboard

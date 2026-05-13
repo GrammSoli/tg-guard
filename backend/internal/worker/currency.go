@@ -17,6 +17,17 @@ type CurrencyWorker struct {
 	client *http.Client
 }
 
+// currencyCacheTTL gives the daily refresh a 1h overlap so the previous
+// snapshot is still readable while the new one is being written.
+const currencyCacheTTL = 25 * time.Hour
+
+// currencyKey assembles an app-namespaced Redis key. The "subguard:fx:"
+// prefix keeps us out of the way if this Redis is ever shared with
+// another service.
+func currencyKey(base, target string) string {
+	return fmt.Sprintf("subguard:fx:%s:%s", base, target)
+}
+
 func NewCurrencyWorker(rdb *redis.Client) *CurrencyWorker {
 	return &CurrencyWorker{
 		rdb:    rdb,
@@ -80,11 +91,23 @@ func (w *CurrencyWorker) update(ctx context.Context) {
 			continue
 		}
 
-		// Store each rate in Redis with 25h TTL
+		// Store each rate in Redis with 25h TTL. We accumulate failures
+		// rather than aborting the whole base — a single transient Redis
+		// write error shouldn't drop the other rates for this base.
+		var failed int
 		for target, rate := range data.Rates {
-			key := fmt.Sprintf("currency:%s:%s", base, target)
-			w.rdb.Set(ctx, key, rate, 25*time.Hour)
+			if err := w.rdb.Set(ctx, currencyKey(base, target), rate, currencyCacheTTL).Err(); err != nil {
+				failed++
+				if failed <= 3 {
+					log.Printf("[currency-worker] redis SET %s->%s error: %v", base, target, err)
+				}
+			}
 		}
-		log.Printf("[currency-worker] updated %d rates for %s", len(data.Rates), base)
+		if failed > 0 {
+			log.Printf("[currency-worker] base=%s: %d of %d rates failed to cache",
+				base, failed, len(data.Rates))
+		} else {
+			log.Printf("[currency-worker] updated %d rates for %s", len(data.Rates), base)
+		}
 	}
 }

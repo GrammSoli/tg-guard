@@ -149,25 +149,43 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
 
   addService: async (roomId, svc) => {
     await api(`/rooms/${roomId}/services`, { method: "POST", body: svc });
-    await get().fetchDetail(roomId);
-    set((s) => ({ rooms: syncRoomFromDetail(s.rooms, s.activeDetail) }));
+    await refetchAfterMutation(get, set, roomId);
   },
 
   removeService: async (roomId, serviceId) => {
     await api(`/rooms/${roomId}/services/${serviceId}`, { method: "DELETE" });
-    await get().fetchDetail(roomId);
-    set((s) => ({ rooms: syncRoomFromDetail(s.rooms, s.activeDetail) }));
+    await refetchAfterMutation(get, set, roomId);
   },
 
   removeMember: async (roomId, userId) => {
     await api(`/rooms/${roomId}/members/${userId}`, { method: "DELETE" });
-    await get().fetchDetail(roomId);
-    set((s) => ({ rooms: syncRoomFromDetail(s.rooms, s.activeDetail) }));
+    await refetchAfterMutation(get, set, roomId);
   },
 
   updateRoom: async (roomId, data) => {
     await api(`/rooms/${roomId}`, { method: "PATCH", body: data });
-    await get().fetchDetail(roomId);
-    set((s) => ({ rooms: syncRoomFromDetail(s.rooms, s.activeDetail) }));
+    await refetchAfterMutation(get, set, roomId);
   },
 }));
+
+// refetchAfterMutation reconciles store state with the server after a
+// successful mutation. The mutation API call already won — losing the
+// refetch shouldn't roll the user back to a "your change vanished" UX.
+// We log + surface a toast and leave the optimistic state intact; the
+// user's next interaction will refresh the data via the normal flow.
+async function refetchAfterMutation(
+  get: () => RoomStore,
+  set: (partial: Partial<RoomStore>) => void,
+  roomId: string,
+) {
+  try {
+    await get().fetchDetail(roomId);
+    set({ rooms: syncRoomFromDetail(get().rooms, get().activeDetail) });
+  } catch (err) {
+    console.warn("[roomStore] post-mutation refetch failed", err);
+    const { toast } = await import("sonner");
+    toast.warning(
+      "Saved, but room details may be stale until you refresh.",
+    );
+  }
+}

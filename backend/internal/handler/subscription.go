@@ -168,13 +168,21 @@ func (h *SubscriptionHandler) Update(c fiber.Ctx) error {
 	if v, ok := body["is_auto_pay"].(bool); ok {
 		sub.IsAutoPay = v
 	}
+	clearNotified := false
 	if v, ok := body["next_payment_at"].(string); ok {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			if !t.Equal(sub.NextPaymentAt) {
+				clearNotified = true
+			}
 			sub.NextPaymentAt = t
 		}
 	}
+	if _, ok := body["period"]; ok {
+		// Period change can shift effective due semantics, treat same.
+		clearNotified = true
+	}
 
-	if err := h.repo.Update(sub); err != nil {
+	if err := h.repo.Update(sub, clearNotified); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update"})
 	}
 

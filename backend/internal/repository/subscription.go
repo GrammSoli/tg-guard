@@ -35,12 +35,27 @@ func (r *SubscriptionRepo) Create(sub *model.Subscription) error {
 	return r.db.Create(sub).Error
 }
 
-func (r *SubscriptionRepo) Update(sub *model.Subscription) error {
-	return r.db.Model(sub).Select(
+// Update writes the user-editable fields of a subscription. When the
+// caller has just changed NextPaymentAt or Period, pass `clearNotified
+// = true` so the worker's dedup flag (notified_at) is reset and a fresh
+// reminder fires on the new date. Without this, editing a sub from
+// "tomorrow" to "next month" would block the reminder for ~20h after
+// the new date arrives.
+func (r *SubscriptionRepo) Update(sub *model.Subscription, clearNotified bool) error {
+	tx := r.db.Model(sub).Select(
 		"Name", "Brand", "Tag", "Note", "IconName", "IconColor",
 		"Amount", "Currency", "Period", "NextPaymentAt",
 		"IsTrial", "IsAutoPay",
-	).Updates(sub).Error
+	)
+	if err := tx.Updates(sub).Error; err != nil {
+		return err
+	}
+	if clearNotified {
+		return r.db.Model(&model.Subscription{}).
+			Where("id = ?", sub.ID).
+			Update("notified_at", nil).Error
+	}
+	return nil
 }
 
 func (r *SubscriptionRepo) Delete(id uuid.UUID, userID uint) error {
