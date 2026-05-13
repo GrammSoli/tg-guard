@@ -275,5 +275,9 @@
   "room.confirmUnpayTitle": "Отмена оплаты",
   "room.confirmUnpayDesc": "Отметить {{name}} как неоплаченного?",
   "room.confirmPay": "Подтвердить",
-  "room.confirmUnpay": "Отменить"
+  "room.confirmUnpay": "Отменить",
+  "room.customService": "Свой сервис",
+  "room.customServiceHint": "Добавить свой платёж или услугу",
+  "room.noteRequired": "Заметка обязательна для различения дубликатов",
+  "room.noteRequiredPh": "напр. Для родителей"
 }

@@ -33,7 +33,7 @@ interface RoomDetailData {
   name: string;
   owner_id: number;
   invite_code: string;
-  services: { id: number; brand: BrandKey; logo_url: string; name: string; amount: number; currency: string; next_payment_at?: string }[];
+  services: { id: number; brand: BrandKey; logo_url: string; name: string; amount: number; currency: string; note?: string; icon_name?: string; icon_color?: string; next_payment_at?: string }[];
   members: { user_id: number; name: string; username?: string; avatar?: string; has_paid: boolean; paid_at?: string }[];
   currency: string;
   total_per_member: number;
@@ -61,7 +61,7 @@ interface RoomStore {
   markPaid: (roomId: string, userId: number) => Promise<void>;
   markUnpaid: (roomId: string, userId: number) => Promise<void>;
   deleteRoom: (id: string) => Promise<void>;
-  addService: (roomId: string, svc: { brand: string; logo_url: string; name: string; amount: number; currency: string }) => Promise<void>;
+  addService: (roomId: string, svc: { brand: string; logo_url: string; name: string; amount: number; currency: string; note?: string; icon_name?: string; icon_color?: string }) => Promise<void>;
   removeService: (roomId: string, serviceId: number) => Promise<void>;
   removeMember: (roomId: string, userId: number) => Promise<void>;
   updateRoom: (roomId: string, data: { billing_day?: number }) => Promise<void>;

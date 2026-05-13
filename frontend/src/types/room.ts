@@ -5,6 +5,9 @@ export interface RoomService {
   name: string;
   amount: number;
   currency: string;
+  note?: string;
+  icon_name?: string;
+  icon_color?: string;
   nextPaymentAt?: string;
 }
 

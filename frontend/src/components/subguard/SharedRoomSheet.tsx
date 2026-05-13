@@ -13,9 +13,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { POPULAR_SERVICES } from "@/lib/mockData";
+import { SUPPORTED_CURRENCIES, convertCurrency } from "@/lib/currencyRates";
 
 import { formatCurrency, formatDate, localeFor } from "@/lib/format";
-import { convertCurrency } from "@/lib/currencyRates";
 import { useTranslation } from "react-i18next";
 import {
   Bell,
@@ -38,6 +38,8 @@ import { hapticImpact, hapticNotification } from "@/lib/telegram";
 import { toast } from "sonner";
 import { DateTz } from "./DateTz";
 import { ServiceLogo } from "./ServiceLogo";
+import { BrandIcon } from "./BrandIcon";
+import { IconPicker } from "./IconPicker";
 import { useSettingsStore } from "@/stores/settingsStore";
 
 interface Props {
@@ -80,6 +82,19 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
   const settings = useSettingsStore((s) => s.settings);
   const userCurrency = settings.defaultCurrency;
 
+  // Custom service form state
+  const [customMode, setCustomMode] = useState(false);
+  const [customName, setCustomName] = useState("");
+  const [customAmount, setCustomAmount] = useState("");
+  const [customCurrency, setCustomCurrency] = useState(userCurrency || "USD");
+  const [customNote, setCustomNote] = useState("");
+  const [customIconName, setCustomIconName] = useState("credit-card");
+  const [customIconColor, setCustomIconColor] = useState("blue");
+
+  // Note field for duplicate brand detection
+  const [pendingNote, setPendingNote] = useState("");
+  const [pendingDupService, setPendingDupService] = useState<(typeof POPULAR_SERVICES)[number] | null>(null);
+
   const room = activeDetail;
   const total = useMemo(
     () => (room ? room.services.reduce((acc, s) => acc + s.amount, 0) : 0),
@@ -98,9 +113,7 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
   const available = useMemo(
     () =>
       room
-        ? POPULAR_SERVICES.filter(
-            (p) => p.logoUrl && !room.services.some((s) => s.brand === p.brand),
-          )
+        ? POPULAR_SERVICES.filter((p) => p.logoUrl)
         : [],
     [room?.services],
   );
@@ -173,7 +186,7 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
     toast.success(t("room.copyInvite"));
   };
 
-  const handleAddService = async (p: (typeof POPULAR_SERVICES)[number]) => {
+  const handleAddService = async (p: (typeof POPULAR_SERVICES)[number], note?: string) => {
     if (!room) return;
     try {
       await addService(room.id, {
@@ -182,12 +195,50 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
         name: p.name,
         amount: p.defaultAmount,
         currency: p.defaultCurrency,
+        note,
       });
       hapticNotification("success");
       setPicking(false);
+      setPendingDupService(null);
+      setPendingNote("");
     } catch {
       hapticNotification("error");
       toast.error(t("toast.addServiceFailed"));
+    }
+  };
+
+  const handleAddCustomService = async () => {
+    if (!room || !customName.trim() || !customAmount) return;
+    try {
+      await addService(room.id, {
+        brand: "default",
+        logo_url: "",
+        name: customName.trim(),
+        amount: parseFloat(customAmount),
+        currency: customCurrency,
+        note: customNote || undefined,
+        icon_name: customIconName,
+        icon_color: customIconColor,
+      });
+      hapticNotification("success");
+      setPicking(false);
+      setCustomMode(false);
+      setCustomName("");
+      setCustomAmount("");
+      setCustomNote("");
+    } catch {
+      hapticNotification("error");
+      toast.error(t("toast.addServiceFailed"));
+    }
+  };
+
+  const handleServiceClick = (p: (typeof POPULAR_SERVICES)[number]) => {
+    const isDuplicate = room?.services.some((s) => s.brand === p.brand);
+    if (isDuplicate) {
+      setPendingDupService(p);
+      setPendingNote("");
+    } else {
+      handleAddService(p);
     }
   };
 
@@ -487,39 +538,115 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
                         <Skeleton className="h-3 w-12 rounded" />
                       </div>
                     ))
-                  ) : filteredAvailable.length === 0 ? (
+                  ) : filteredAvailable.length === 0 && !customMode ? (
                     <div className="animate-smooth-fade flex flex-col items-center gap-2 px-3 py-6">
                       <p className="text-xs text-muted-foreground">
-                        {available.length === 0 ? t("room.allServicesAdded") : t("room.notFound")}
+                        {t("room.notFound")}
                       </p>
-                      {available.length > 0 && (
-                        <>
-                          <p className="text-[11px] text-muted-foreground/60">{t("room.tryAnotherQuery")}</p>
-                          <button
-                            onClick={() => setServiceSearch("")}
-                            className="mt-1 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
-                          >
-                            {t("room.clearSearch")}
-                          </button>
-                        </>
-                      )}
+                      <p className="text-[11px] text-muted-foreground/60">{t("room.tryAnotherQuery")}</p>
+                      <button
+                        onClick={() => setServiceSearch("")}
+                        className="mt-1 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+                      >
+                        {t("room.clearSearch")}
+                      </button>
                     </div>
                   ) : (
-                    filteredAvailable.map((p, i) => (
-                      <button
-                        key={p.id}
-                        onClick={() => handleAddService(p)}
-                        className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
-                        style={{ animationDelay: `${i * 30}ms`, animationFillMode: "backwards" }}
-                      >
-                        <ServiceLogo brand={p.brand as any} name={p.name} size={32} rounded="xl" />
-                        <span className="flex-1 text-sm font-medium">{p.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {formatCurrency(convertCurrency(p.defaultAmount, p.defaultCurrency, userCurrency), userCurrency, lc)}
-                        </span>
-                        <Plus className="h-4 w-4 text-muted-foreground" />
-                      </button>
-                    ))
+                    <>
+                      {filteredAvailable.map((p, i) => (
+                        <button
+                          key={p.id}
+                          onClick={() => handleServiceClick(p)}
+                          className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
+                          style={{ animationDelay: `${i * 30}ms`, animationFillMode: "backwards" }}
+                        >
+                          <ServiceLogo brand={p.brand as any} name={p.name} size={32} rounded="xl" />
+                          <span className="flex-1 text-sm font-medium">{p.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatCurrency(convertCurrency(p.defaultAmount, p.defaultCurrency, userCurrency), userCurrency, lc)}
+                          </span>
+                          <Plus className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      ))}
+
+                      {/* Custom service button */}
+                      {!customMode && (
+                        <button
+                          onClick={() => setCustomMode(true)}
+                          className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
+                        >
+                          <div className="bg-primary/15 flex h-8 w-8 items-center justify-center rounded-xl">
+                            <Plus className="h-4 w-4 text-primary" />
+                          </div>
+                          <div className="flex-1">
+                            <span className="text-sm font-medium">{t("room.customService")}</span>
+                            <p className="text-[10px] text-muted-foreground">{t("room.customServiceHint")}</p>
+                          </div>
+                        </button>
+                      )}
+
+                      {/* Custom service inline form */}
+                      {customMode && (
+                        <div className="animate-smooth-fade space-y-2 rounded-xl bg-surface-elevated p-3">
+                          <input
+                            type="text"
+                            placeholder={t("modal.customName")}
+                            value={customName}
+                            onChange={(e) => setCustomName(e.target.value)}
+                            className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+                          />
+                          <div className="flex gap-2">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              placeholder={t("modal.amount")}
+                              value={customAmount}
+                              onChange={(e) => setCustomAmount(e.target.value)}
+                              className="flex-1 rounded-lg border border-white/10 bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+                            />
+                            <select
+                              value={customCurrency}
+                              onChange={(e) => setCustomCurrency(e.target.value)}
+                              className="w-20 rounded-lg border border-white/10 bg-background px-2 py-2 text-sm outline-none"
+                            >
+                              {SUPPORTED_CURRENCIES.map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <input
+                            type="text"
+                            placeholder={t("modal.notePh")}
+                            value={customNote}
+                            onChange={(e) => setCustomNote(e.target.value)}
+                            className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+                          />
+                          <IconPicker
+                            iconName={customIconName}
+                            iconColor={customIconColor}
+                            onChange={({ iconName, iconColor }) => {
+                              setCustomIconName(iconName);
+                              setCustomIconColor(iconColor);
+                            }}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setCustomMode(false)}
+                              className="flex-1 rounded-xl bg-surface py-2 text-xs font-semibold transition-colors hover:bg-surface-elevated"
+                            >
+                              {t("room.cancel")}
+                            </button>
+                            <button
+                              disabled={!customName.trim() || !customAmount}
+                              onClick={handleAddCustomService}
+                              className="bg-gradient-primary flex-1 rounded-xl py-2 text-xs font-semibold text-white shadow-elevated transition-transform active:scale-[0.98] disabled:opacity-50"
+                            >
+                              {t("room.addService")}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -533,12 +660,21 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
               )}
               {room.services.map((s) => (
                 <div
-                  key={s.brand}
+                  key={s.id}
                   className="bg-surface flex items-center gap-3 rounded-2xl p-3"
                 >
-                  <ServiceLogo brand={s.brand as any} name={s.name} size={40} rounded="xl" />
+                  {s.brand === "default" && s.icon_name && s.icon_color ? (
+                    <BrandIcon brand="default" size="md" iconName={s.icon_name} iconColor={s.icon_color} />
+                  ) : (
+                    <ServiceLogo brand={s.brand as any} name={s.name} size={40} rounded="xl" />
+                  )}
                   <div className="flex-1">
-                    <p className="text-sm font-semibold">{s.name}</p>
+                    <p className="text-sm font-semibold">
+                      {s.name}
+                      {s.note && (
+                        <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">— {s.note}</span>
+                      )}
+                    </p>
                     <p className="text-[11px] text-muted-foreground">
                       {formatCurrency(convertCurrency(s.amount, s.currency, userCurrency), userCurrency, lc)} {t("dashboard.perMonth")} • {t("room.splitWays", { count: room.members.length })}
                     </p>
@@ -551,8 +687,8 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
                   </div>
                   {room.is_owner && (
                     <button
-                      onClick={() => setPendingRemoveService({ id: s.id, brand: s.brand })}
-                      aria-label={`Remove ${s.brand}`}
+                      onClick={() => setPendingRemoveService({ id: s.id, brand: s.name })}
+                      aria-label={`Remove ${s.name}`}
                       className="bg-surface-elevated hover:bg-destructive/20 hover:text-destructive flex h-9 w-9 items-center justify-center rounded-full transition-colors active:scale-90"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -695,6 +831,43 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
               {pendingPayAction?.action === "pay"
                 ? t("room.confirmPay")
                 : t("room.confirmUnpay")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Duplicate brand — require Note */}
+      <AlertDialog
+        open={!!pendingDupService}
+        onOpenChange={(o) => !o && setPendingDupService(null)}
+      >
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{pendingDupService?.name}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("room.noteRequired")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <input
+            type="text"
+            placeholder={t("room.noteRequiredPh")}
+            value={pendingNote}
+            onChange={(e) => setPendingNote(e.target.value)}
+            className="w-full rounded-xl border border-white/10 bg-surface-elevated px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            autoFocus
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("room.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!pendingNote.trim()}
+              className="bg-gradient-primary text-white disabled:opacity-50"
+              onClick={() => {
+                if (pendingDupService && pendingNote.trim()) {
+                  handleAddService(pendingDupService, pendingNote.trim());
+                }
+              }}
+            >
+              {t("room.addService")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

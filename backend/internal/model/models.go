@@ -82,6 +82,9 @@ type RoomService struct {
 	RoomID        uuid.UUID  `gorm:"type:uuid;index;not null" json:"-"`
 	Brand         string     `gorm:"size:32" json:"brand"`
 	Name          string     `gorm:"size:100" json:"name"`
+	Note          string     `gorm:"size:128" json:"note,omitempty"`
+	IconName      string     `gorm:"size:32" json:"icon_name,omitempty"`
+	IconColor     string     `gorm:"size:16" json:"icon_color,omitempty"`
 	Amount        float64    `json:"amount"`
 	Currency      string     `gorm:"size:3" json:"currency"`
 	NextPaymentAt *time.Time `json:"next_payment_at,omitempty"`
