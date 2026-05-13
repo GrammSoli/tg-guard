@@ -173,7 +173,7 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
             {categories.map(([name, val]) => (
               <div key={name}>
                 <div className="mb-1 flex justify-between text-xs">
-                  <span className="font-medium">{name}</span>
+                  <span className="font-medium">{t(`category.${name.toLowerCase()}`, name)}</span>
                   <span className="tabular-nums text-muted-foreground">
                     {formatCurrency(val, currency, lc)}
                   </span>
@@ -214,7 +214,7 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
                   </p>
                 </div>
                 <p className="text-sm font-bold tabular-nums">
-                  {formatCurrency(s.amount, s.currency, lc)}
+                  {formatCurrency(convertCurrency(s.amount, s.currency, currency), currency, lc)}
                 </p>
               </div>
             ))
