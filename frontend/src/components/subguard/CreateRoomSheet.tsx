@@ -29,6 +29,8 @@ import { hapticNotification } from "@/lib/telegram";
 import { toast } from "sonner";
 import { Check, Plus, X } from "lucide-react";
 import { ServiceLogo } from "./ServiceLogo";
+import { BrandIcon } from "./BrandIcon";
+import { IconPicker } from "./IconPicker";
 
 interface Props {
   open: boolean;
@@ -41,6 +43,9 @@ interface PickedService {
   name: string;
   amount: number;
   currency: string;
+  note?: string;
+  icon_name?: string;
+  icon_color?: string;
 }
 
 export function CreateRoomSheet({ open, onOpenChange }: Props) {
@@ -56,6 +61,15 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
   const [services, setServices] = useState<PickedService[]>([]);
   const [saving, setSaving] = useState(false);
   const [serviceSearch, setServiceSearch] = useState("");
+
+  // Custom service form state
+  const [customMode, setCustomMode] = useState(false);
+  const [customName, setCustomName] = useState("");
+  const [customAmount, setCustomAmount] = useState("");
+  const [customCurrency, setCustomCurrency] = useState(defaultCurrency || "USD");
+  const [customNote, setCustomNote] = useState("");
+  const [customIconName, setCustomIconName] = useState("credit-card");
+  const [customIconColor, setCustomIconColor] = useState("blue");
 
   // Adopt the settings currency only while the user hasn't edited the field
   // themselves. Once they touch the select we treat their value as canonical.
@@ -105,8 +119,29 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
     ]);
   };
 
-  const removeService = (brand: string) => {
-    setServices((prev) => prev.filter((s) => s.brand !== brand));
+  const removeService = (idx: number) => {
+    setServices((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const addCustomService = () => {
+    if (!customName.trim() || !customAmount) return;
+    setServices((prev) => [
+      ...prev,
+      {
+        brand: "default",
+        logoUrl: "",
+        name: customName.trim(),
+        amount: parseFloat(customAmount),
+        currency: customCurrency,
+        note: customNote || undefined,
+        icon_name: customIconName,
+        icon_color: customIconColor,
+      },
+    ]);
+    setCustomMode(false);
+    setCustomName("");
+    setCustomAmount("");
+    setCustomNote("");
   };
 
   const handleSave = async () => {
@@ -129,6 +164,9 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
           name: s.name,
           amount: Math.round(convertCurrency(s.amount, s.currency, currency) * 100) / 100,
           currency,
+          note: s.note,
+          icon_name: s.icon_name,
+          icon_color: s.icon_color,
         }))
       });
       hapticNotification("success");
@@ -206,20 +244,29 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                   {t("createRoom.selected", { count: services.length })}
                 </p>
                 <div className="space-y-2">
-                  {services.map((s) => (
+                {services.map((s, idx) => (
                     <div
-                      key={s.brand}
+                      key={`${s.brand}-${idx}`}
                       className="bg-surface flex items-center gap-3 rounded-2xl p-3"
                     >
-                      <ServiceLogo brand={s.brand as any} name={s.name} size={36} rounded="xl" />
+                      {s.brand === "default" && s.icon_name && s.icon_color ? (
+                        <BrandIcon brand="default" size="sm" iconName={s.icon_name} iconColor={s.icon_color} />
+                      ) : (
+                        <ServiceLogo brand={s.brand as any} name={s.name} size={36} rounded="xl" />
+                      )}
                       <div className="flex-1">
-                        <p className="text-sm font-semibold">{s.name}</p>
+                        <p className="text-sm font-semibold">
+                          {s.name}
+                          {s.note && (
+                            <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">— {s.note}</span>
+                          )}
+                        </p>
                         <p className="text-[11px] text-muted-foreground">
                           {formatCurrency(convertCurrency(s.amount, s.currency, currency), currency, lc)} {t("dashboard.perMonth")}
                         </p>
                       </div>
                       <button
-                        onClick={() => removeService(s.brand)}
+                        onClick={() => removeService(idx)}
                         className="bg-surface-elevated flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/20 hover:text-destructive"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -276,21 +323,101 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                       )}
                     </div>
                   ) : (
-                    filteredAvailable.map((p, i) => (
-                      <button
-                        key={p.id}
-                        onClick={() => addService(p)}
-                        className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
-                        style={{ animationDelay: `${i * 30}ms`, animationFillMode: "backwards" }}
-                      >
-                        <ServiceLogo brand={p.brand as any} name={p.name} size={32} rounded="xl" />
-                        <span className="flex-1 text-sm font-medium">{p.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {formatCurrency(convertCurrency(p.defaultAmount, p.defaultCurrency, currency), currency, lc)}
-                        </span>
-                        <Plus className="h-4 w-4 text-muted-foreground" />
-                      </button>
-                    ))
+                    <>
+                      {/* Custom service — always first */}
+                      {!customMode && (
+                        <button
+                          onClick={() => setCustomMode(true)}
+                          className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
+                        >
+                          <div className="bg-primary/15 flex h-8 w-8 items-center justify-center rounded-xl">
+                            <Plus className="h-4 w-4 text-primary" />
+                          </div>
+                          <div className="flex-1">
+                            <span className="text-sm font-medium">{t("room.customService")}</span>
+                            <p className="text-[10px] text-muted-foreground">{t("room.customServiceHint")}</p>
+                          </div>
+                        </button>
+                      )}
+
+                      {/* Custom service inline form */}
+                      {customMode && (
+                        <div className="animate-smooth-fade space-y-2 rounded-xl bg-surface-elevated p-3">
+                          <input
+                            type="text"
+                            placeholder={t("modal.customName")}
+                            value={customName}
+                            onChange={(e) => setCustomName(e.target.value)}
+                            className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+                          />
+                          <div className="flex gap-2">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              placeholder={t("modal.amount")}
+                              value={customAmount}
+                              onChange={(e) => setCustomAmount(e.target.value)}
+                              className="flex-1 rounded-lg border border-white/10 bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+                            />
+                            <select
+                              value={customCurrency}
+                              onChange={(e) => setCustomCurrency(e.target.value)}
+                              className="w-20 rounded-lg border border-white/10 bg-background px-2 py-2 text-sm outline-none"
+                            >
+                              {SUPPORTED_CURRENCIES.map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <input
+                            type="text"
+                            placeholder={t("modal.notePh")}
+                            value={customNote}
+                            onChange={(e) => setCustomNote(e.target.value)}
+                            className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+                          />
+                          <IconPicker
+                            iconName={customIconName}
+                            iconColor={customIconColor}
+                            onChange={({ iconName, iconColor }) => {
+                              setCustomIconName(iconName);
+                              setCustomIconColor(iconColor);
+                            }}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setCustomMode(false)}
+                              className="flex-1 rounded-xl bg-surface py-2 text-xs font-semibold transition-colors hover:bg-surface-elevated"
+                            >
+                              {t("room.cancel")}
+                            </button>
+                            <button
+                              disabled={!customName.trim() || !customAmount}
+                              onClick={addCustomService}
+                              className="bg-gradient-primary flex-1 rounded-xl py-2 text-xs font-semibold text-white shadow-elevated transition-transform active:scale-[0.98] disabled:opacity-50"
+                            >
+                              {t("room.addService")}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {filteredAvailable.map((p, i) => (
+                        <button
+                          key={p.id}
+                          onClick={() => addService(p)}
+                          className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
+                          style={{ animationDelay: `${i * 30}ms`, animationFillMode: "backwards" }}
+                        >
+                          <ServiceLogo brand={p.brand as any} name={p.name} size={32} rounded="xl" />
+                          <span className="flex-1 text-sm font-medium">{p.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatCurrency(convertCurrency(p.defaultAmount, p.defaultCurrency, currency), currency, lc)}
+                          </span>
+                          <Plus className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      ))}
+                    </>
                   )}
                 </div>
               </div>
