@@ -29,6 +29,8 @@ type TrafficSourceStat struct {
 type StatsResult struct {
 	// Users cohorts
 	TotalUsers    int64 `json:"total_users"`
+	ActiveUsers   int64 `json:"active_users"`
+	ChurnedUsers  int64 `json:"churned_users"`
 	UsersToday    int64 `json:"users_today"`
 	UsersYesterday int64 `json:"users_yesterday"`
 	UsersWeek     int64 `json:"users_week"`
@@ -66,6 +68,8 @@ func (r *AdminRepo) GetStats() (*StatsResult, error) {
 		SELECT
 			-- User cohorts (only non-deleted, non-banned)
 			COUNT(*)                                                          AS total_users,
+			COUNT(*) FILTER (WHERE u.is_active = true)                        AS active_users,
+			COUNT(*) FILTER (WHERE u.is_active = false)                       AS churned_users,
 			COUNT(*) FILTER (WHERE u.created_at >= $1)                        AS users_today,
 			COUNT(*) FILTER (WHERE u.created_at >= $2 AND u.created_at < $1)  AS users_yesterday,
 			COUNT(*) FILTER (WHERE u.created_at >= $3)                        AS users_week,
