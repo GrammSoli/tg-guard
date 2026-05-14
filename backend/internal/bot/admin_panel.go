@@ -1,7 +1,9 @@
 package bot
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"fmt"
 	"log"
 	"strconv"
@@ -220,6 +222,9 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 
 	case data == "admin_bc_confirm":
 		p.broadcast.handleBroadcastConfirm(ctx, b, cb.From.ID, chatID, msgID)
+
+	case data == "admin_export_csv":
+		p.handleExportCSV(ctx, b, chatID, msgID)
 
 	case data == "admin_recs_toggle":
 		p.handleRecsToggle(ctx, b, chatID, msgID)
@@ -447,7 +452,12 @@ func (p *adminPanel) handleStats(ctx context.Context, b *tgbot.Bot, chatID int64
 		}
 	}
 
-	kb := backButton()
+	kb := models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "📥 Экспорт в CSV", CallbackData: "admin_export_csv"}},
+			{{Text: "🔙 Назад", CallbackData: "admin_back"}},
+		},
+	}
 	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
 		ChatID:      chatID,
 		MessageID:   msgID,
@@ -455,6 +465,79 @@ func (p *adminPanel) handleStats(ctx context.Context, b *tgbot.Bot, chatID int64
 		ParseMode:   "Markdown",
 		ReplyMarkup: &kb,
 	})
+}
+
+// ── CSV Export ──────────────────────────────────────────
+
+func (p *adminPanel) handleExportCSV(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int) {
+	// Notify admin that generation is in progress.
+	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+		ChatID:    chatID,
+		MessageID: msgID,
+		Text:      "⏳ Формирую файл...",
+	})
+
+	// Fetch all active users.
+	var users []model.User
+	err := p.db.Where("is_banned = false AND deleted_at IS NULL").
+		Order("created_at DESC").
+		Find(&users).Error
+	if err != nil {
+		log.Printf("[admin] export csv error: %v", err)
+		b.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "❌ Ошибка при выгрузке данных.",
+		})
+		return
+	}
+
+	// Generate CSV in memory.
+	var buf bytes.Buffer
+	// UTF-8 BOM for Excel compatibility.
+	buf.Write([]byte{0xEF, 0xBB, 0xBF})
+	w := csv.NewWriter(&buf)
+
+	// Header row.
+	w.Write([]string{"tg_id", "username", "first_name", "last_name", "locale", "is_premium", "traffic_source", "created_at"})
+
+	for _, u := range users {
+		premium := "no"
+		if u.IsDonator {
+			premium = "yes"
+		}
+		w.Write([]string{
+			strconv.FormatInt(u.TelegramID, 10),
+			u.Username,
+			u.FirstName,
+			u.LastName,
+			u.Locale,
+			premium,
+			u.TrafficSourceID,
+			u.CreatedAt.Format("2006-01-02 15:04:05"),
+		})
+	}
+	w.Flush()
+
+	// Build filename with today's date.
+	filename := fmt.Sprintf("subguard_users_export_%s.csv", time.Now().Format("2006_01_02"))
+
+	// Send the document.
+	_, sendErr := b.SendDocument(ctx, &tgbot.SendDocumentParams{
+		ChatID: chatID,
+		Document: &models.InputFileUpload{
+			Filename: filename,
+			Data:     bytes.NewReader(buf.Bytes()),
+		},
+		Caption: fmt.Sprintf("✅ Экспорт завершён. В файле записей: *%d*", len(users)),
+		ParseMode: "Markdown",
+	})
+	if sendErr != nil {
+		log.Printf("[admin] export csv send error: %v", sendErr)
+		b.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "❌ Ошибка при отправке файла.",
+		})
+	}
 }
 
 // ── Users Module ───────────────────────────────────────
