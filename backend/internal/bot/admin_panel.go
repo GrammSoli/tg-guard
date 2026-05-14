@@ -390,8 +390,16 @@ func (p *adminPanel) handleStats(ctx context.Context, b *tgbot.Bot, chatID int64
 	sb.WriteString("📊 *Аналитика SubGuard*\n\n")
 
 	// ── Audience ──
+	// Churn rate as a percentage of total. Guarded against div-by-zero
+	// for a brand-new DB (TotalUsers == 0).
+	churnRate := 0
+	if stats.TotalUsers > 0 {
+		churnRate = int(stats.ChurnedUsers * 100 / stats.TotalUsers)
+	}
 	sb.WriteString("👥 *Аудитория*\n")
-	sb.WriteString(fmt.Sprintf("• Всего: *%d*\n", stats.TotalUsers))
+	sb.WriteString(fmt.Sprintf("• Всего заходило: *%d*\n", stats.TotalUsers))
+	sb.WriteString(fmt.Sprintf("• 🟢 Живых (Active): *%d*\n", stats.ActiveUsers))
+	sb.WriteString(fmt.Sprintf("• 🔴 Отписок (Churn): *%d* (%d%%)\n", stats.ChurnedUsers, churnRate))
 	sb.WriteString(fmt.Sprintf("• Сегодня: *+%d*\n", stats.UsersToday))
 
 	// Traffic source attribution for today

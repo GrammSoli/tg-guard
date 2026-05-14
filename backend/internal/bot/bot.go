@@ -101,7 +101,72 @@ func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWork
 		},
 	)
 
+	// ── Churn tracking ────────────────────────────────────
+	// Telegram sends `my_chat_member` updates whenever a user blocks or
+	// unblocks the bot. The go-telegram/bot lib does NOT expose a
+	// HandlerType enum for these (the enum covers messages and callbacks
+	// only), so we route via RegisterHandlerMatchFunc — fires on every
+	// update whose MyChatMember field is non-nil.
+	b.RegisterHandlerMatchFunc(
+		func(update *models.Update) bool { return update.MyChatMember != nil },
+		func(ctx context.Context, _ *tgbot.Bot, update *models.Update) {
+			handleMyChatMember(ctx, update, db)
+		},
+	)
+
 	return b, nil
+}
+
+// handleMyChatMember toggles users.is_active when a user blocks/unblocks
+// the bot, so admin stats can compute churn rate without polling Telegram
+// for every user's reachability.
+//
+// Telegram fires `my_chat_member` in three contexts; we only care about
+// the first:
+//
+//  1. Private 1-1 chat (chat.type == "private") — the user blocked or
+//     unblocked our bot. NewChatMember.Type == "kicked" (block) or
+//     "member" (unblock).
+//  2. Group / supergroup — the bot was added/removed/promoted. Not user
+//     churn, ignored.
+//  3. Channel — same, ignored.
+//
+// On unblock the user usually also fires /start, which handleStart will
+// re-confirm is_active=true. We still process the my_chat_member path
+// because a user can unblock without re-/starting (just unmute the chat).
+func handleMyChatMember(ctx context.Context, update *models.Update, db *gorm.DB) {
+	cmu := update.MyChatMember
+	if cmu == nil || cmu.Chat.Type != "private" {
+		return
+	}
+	tgID := cmu.From.ID
+	if tgID == 0 {
+		return
+	}
+
+	var isActive bool
+	switch cmu.NewChatMember.Type {
+	case models.ChatMemberTypeBanned: // "kicked" in TG wire format
+		isActive = false
+	case models.ChatMemberTypeMember:
+		isActive = true
+	default:
+		// "left", "restricted", "administrator", "creator" — not meaningful
+		// for user-bot reachability in a private chat. Ignore.
+		return
+	}
+
+	res := db.WithContext(ctx).Model(&model.User{}).
+		Where("telegram_id = ?", tgID).
+		Update("is_active", isActive)
+	if res.Error != nil {
+		log.Printf("[bot/my_chat_member] update tg=%d active=%v: %v", tgID, isActive, res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("[bot/my_chat_member] tg=%d is_active=%v (status=%s)",
+			tgID, isActive, cmu.NewChatMember.Type)
+	}
 }
 
 func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *config.Config, db *gorm.DB, adminRepo *repository.AdminRepo) {
@@ -123,6 +188,14 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 		if user.DeletedAt.Valid {
 			db.Unscoped().Model(&user).Update("deleted_at", gorm.Expr("NULL"))
 			user.DeletedAt.Valid = false
+		}
+		// Force is_active=true on every /start so a user who blocked the
+		// bot and is now back (the unblock fires a separate my_chat_member
+		// update, but those can be missed on webhook outage) is counted as
+		// retained again, not churned. No-op when already true.
+		if !user.IsActive {
+			db.Model(&user).Update("is_active", true)
+			user.IsActive = true
 		}
 
 	case errors.Is(err, gorm.ErrRecordNotFound):
