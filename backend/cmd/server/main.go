@@ -82,8 +82,9 @@ func main() {
 		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`)
 		_, _ = sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users (deleted_at)`)
 		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT false`)
+		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`)
 		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS traffic_source_id VARCHAR(64) DEFAULT ''`)
-		log.Println("ensured deleted_at + is_banned + traffic_source_id columns exist")
+		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id columns exist")
 	}
 
 	// Auto-migrate only in test/dev. Production should run a dedicated
