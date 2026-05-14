@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"sort"
@@ -86,7 +88,7 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 		user := model.User{TelegramID: tgUser.ID}
 		result := db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user)
 		if result.Error != nil {
-			if result.Error == gorm.ErrRecordNotFound {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				user = model.User{
 					TelegramID: tgUser.ID,
 					FirstName:  tgUser.FirstName,
@@ -96,20 +98,19 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 					Locale:     localeFromCode(tgUser.LanguageCode),
 				}
 				if err := db.Create(&user).Error; err != nil {
+					log.Printf("[auth] failed to create user tg=%d: %v", tgUser.ID, err)
 					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 						"error": "failed to create user",
 					})
 				}
 			} else {
+				log.Printf("[auth] db error looking up tg=%d: %v", tgUser.ID, result.Error)
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 					"error": "database error",
 				})
 			}
 		} else {
-			// Update profile fields that may have changed. Skip empty
-			// values so a transient empty response from Telegram (e.g.
-			// CDN burp returning a blank photo_url) can't overwrite the
-			// existing stored value with "".
+			// User found (possibly soft-deleted). Restore if needed.
 			profileUpdates := map[string]interface{}{}
 			if tgUser.FirstName != "" {
 				profileUpdates["first_name"] = tgUser.FirstName
@@ -123,9 +124,11 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 			if tgUser.PhotoURL != "" {
 				profileUpdates["photo_url"] = tgUser.PhotoURL
 			}
-			// Restore soft-deleted user on re-auth
+			// Restore soft-deleted user — gorm.Expr("NULL") is required
+			// because GORM's Updates() silently skips Go nil values.
 			if user.DeletedAt.Valid {
-				profileUpdates["deleted_at"] = nil
+				profileUpdates["deleted_at"] = gorm.Expr("NULL")
+				user.DeletedAt.Valid = false // clear in-memory flag
 			}
 			if len(profileUpdates) > 0 {
 				db.Unscoped().Model(&user).Updates(profileUpdates)

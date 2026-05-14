@@ -117,8 +117,9 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 		}
 		db.Create(&user)
 	} else if user.DeletedAt.Valid {
-		// Restore soft-deleted user on /start
-		db.Unscoped().Model(&user).Update("deleted_at", nil)
+		// Restore soft-deleted user on /start — gorm.Expr required, nil is skipped
+		db.Unscoped().Model(&user).Update("deleted_at", gorm.Expr("NULL"))
+		user.DeletedAt.Valid = false
 	}
 
 	// Silently ignore banned users
