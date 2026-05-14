@@ -104,6 +104,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       await api("/me", { method: "PATCH", body: apiPatch });
     } catch (err) {
       set({ settings: prev });
+      // Ban errors are handled globally by useBanStore → BannedScreen.
+      // Don't re-throw — callers would show a misleading toast.
+      if (err instanceof ApiError && err.message === "account_banned") return;
       if (err instanceof ApiError) {
         throw err;
       }
