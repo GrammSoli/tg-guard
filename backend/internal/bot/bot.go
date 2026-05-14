@@ -195,6 +195,12 @@ func handleRenewCallback(ctx context.Context, b *tgbot.Bot, update *models.Updat
 	// Persist: new payment date + clear notified_at so the worker can
 	// fire again before the *next* renewal. If this was a trial, convert
 	// it to a regular paid subscription.
+	//
+	// Optimistic lock: scope the UPDATE to the next_payment_at value we
+	// just read. If a concurrent click (Telegram retries the callback when
+	// our ack is slow; users also occasionally double-tap) already
+	// advanced the row, this UPDATE matches zero rows and we bail —
+	// otherwise we'd advance twice from a stale base date.
 	updates := map[string]interface{}{
 		"next_payment_at": next,
 		"notified_at":     nil,
@@ -202,11 +208,18 @@ func handleRenewCallback(ctx context.Context, b *tgbot.Bot, update *models.Updat
 	if sub.IsTrial {
 		updates["is_trial"] = false
 	}
-	if err := db.WithContext(ctx).Model(&model.Subscription{}).
-		Where("id = ?", sub.ID).
-		Updates(updates).Error; err != nil {
-		log.Printf("[bot.renew] update error: %v", err)
+	result := db.WithContext(ctx).Model(&model.Subscription{}).
+		Where("id = ? AND next_payment_at = ?", sub.ID, prev).
+		Updates(updates)
+	if result.Error != nil {
+		log.Printf("[bot.renew] update error: %v", result.Error)
 		answerAndLog("save failed")
+		return
+	}
+	if result.RowsAffected == 0 {
+		log.Printf("[bot.renew] optimistic-lock miss for sub %s (already advanced from %s) — ignoring duplicate click",
+			sub.ID, prev.Format(time.RFC3339))
+		answerAndLog(alreadyRenewedToastLabel(owner.Locale))
 		return
 	}
 	sub.NextPaymentAt = next
@@ -330,6 +343,16 @@ func renewToastLabel(locale string) string {
 		return "✅ Дата обновлена"
 	}
 	return "✅ Renewed"
+}
+
+// alreadyRenewedToastLabel is shown when the optimistic lock detects that
+// the subscription has already been advanced by a concurrent click — the
+// user's tap was a no-op, not an error, and the toast should reflect that.
+func alreadyRenewedToastLabel(locale string) string {
+	if locale == "ru" {
+		return "ℹ️ Уже обновлено"
+	}
+	return "ℹ️ Already renewed"
 }
 
 func cancelToastLabel(locale string) string {
