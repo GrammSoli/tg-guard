@@ -215,6 +215,12 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	case data == "admin_traffic_new":
 		p.handleTrafficNewPrompt(ctx, b, cb.From.ID, chatID, msgID)
 
+	case strings.HasPrefix(data, "traf_v:"):
+		p.handleTrafficView(ctx, b, data, chatID, msgID)
+
+	case strings.HasPrefix(data, "traf_d:"):
+		p.handleTrafficDelete(ctx, b, data, chatID, msgID)
+
 	case strings.HasPrefix(data, "admin_offer_view:"):
 		p.handleOfferView(ctx, b, data, chatID, msgID)
 
@@ -681,22 +687,30 @@ func (p *adminPanel) handleTrafficMenu(ctx context.Context, b *tgbot.Bot, chatID
 	if len(campaigns) == 0 {
 		text += "_Кампаний пока нет_"
 	} else {
-		for i, c := range campaigns {
-			if i >= 15 {
-				text += fmt.Sprintf("\n_...и ещё %d_", len(campaigns)-15)
-				break
-			}
-			text += fmt.Sprintf("`%s` — 👆 %d клик, 🚀 %d старт, ✅ %d рег\n",
-				c.Tag, c.Clicks, c.BotStarts, c.Auths)
-		}
+		text += "Выберите кампанию для просмотра деталей:"
 	}
 
-	kb := models.InlineKeyboardMarkup{
-		InlineKeyboard: [][]models.InlineKeyboardButton{
-			{{Text: "🔗 Создать ссылку", CallbackData: "admin_traffic_new"}},
-			{{Text: "🔙 Назад", CallbackData: "admin_back"}},
-		},
+	var buttons [][]models.InlineKeyboardButton
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: "🔗 Создать ссылку", CallbackData: "admin_traffic_new"},
+	})
+
+	for i, c := range campaigns {
+		if i >= 20 {
+			break
+		}
+		label := fmt.Sprintf("%s — 🖱 %d | ✅ %d", c.Tag, c.BotStarts, c.Auths)
+		// Use tag ID to keep callback under 64 bytes.
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: label, CallbackData: fmt.Sprintf("traf_v:%d", c.ID)},
+		})
 	}
+
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: "🔙 Назад", CallbackData: "admin_back"},
+	})
+
+	kb := models.InlineKeyboardMarkup{InlineKeyboard: buttons}
 	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
 		ChatID:      chatID,
 		MessageID:   msgID,
@@ -704,6 +718,62 @@ func (p *adminPanel) handleTrafficMenu(ctx context.Context, b *tgbot.Bot, chatID
 		ParseMode:   "Markdown",
 		ReplyMarkup: &kb,
 	})
+}
+
+func (p *adminPanel) handleTrafficView(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
+	// data = "traf_v:42"
+	parts := strings.SplitN(data, ":", 2)
+	if len(parts) < 2 {
+		return
+	}
+	id, _ := strconv.ParseUint(parts[1], 10, 64)
+
+	var campaign model.TrafficCampaign
+	if err := p.db.First(&campaign, id).Error; err != nil {
+		b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+			ChatID: chatID, MessageID: msgID,
+			Text: "❌ Кампания не найдена.",
+		})
+		return
+	}
+
+	// Get bot username for the link
+	botUsername := "SubGuardBot"
+	if info, err := b.GetMe(ctx); err == nil && info != nil {
+		botUsername = info.Username
+	}
+
+	link := fmt.Sprintf("https://t.me/%s?start=%s", botUsername, campaign.Tag)
+
+	text := fmt.Sprintf("🏷 *Кампания:* `%s`\n🔗 *Ссылка:*\n`%s`\n\n📊 *Статистика:*\n🚀 Стартов бота: %d\n✅ Регистраций: %d",
+		campaign.Tag, link, campaign.BotStarts, campaign.Auths)
+
+	kb := models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "🗑 Удалить кампанию", CallbackData: fmt.Sprintf("traf_d:%d", campaign.ID)}},
+			{{Text: "🔙 К списку", CallbackData: "admin_traffic"}},
+		},
+	}
+
+	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   msgID,
+		Text:        text,
+		ParseMode:   "Markdown",
+		ReplyMarkup: &kb,
+	})
+}
+
+func (p *adminPanel) handleTrafficDelete(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
+	// data = "traf_d:42"
+	parts := strings.SplitN(data, ":", 2)
+	if len(parts) < 2 {
+		return
+	}
+	id, _ := strconv.ParseUint(parts[1], 10, 64)
+	p.db.Delete(&model.TrafficCampaign{}, id)
+	// Return to campaign list
+	p.handleTrafficMenu(ctx, b, chatID, msgID)
 }
 
 func (p *adminPanel) handleTrafficNewPrompt(ctx context.Context, b *tgbot.Bot, tgID, chatID int64, msgID int) {

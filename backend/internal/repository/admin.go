@@ -153,6 +153,19 @@ func (r *AdminRepo) EnsureCampaign(tag string) error {
 	).Error
 }
 
+func (r *AdminRepo) GetCampaignByTag(tag string) (*model.TrafficCampaign, error) {
+	var c model.TrafficCampaign
+	err := r.db.Where("tag = ?", tag).First(&c).Error
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *AdminRepo) DeleteCampaign(tag string) error {
+	return r.db.Where("tag = ?", tag).Delete(&model.TrafficCampaign{}).Error
+}
+
 // ── Sponsored Offers ───────────────────────────────────
 
 func (r *AdminRepo) ListOffers() ([]model.SponsoredOffer, error) {
