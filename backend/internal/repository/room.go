@@ -30,32 +30,34 @@ func (r *RoomRepo) ListByUser(userID uint) ([]model.SharedRoom, error) {
 	return rooms, err
 }
 
+// memberUserSelect keeps the Members.User preload to the columns
+// handler/room.go GetDetail actually projects onto RoomMember (name,
+// username, photo_url) plus the PK. Avoids paging in 200+ bytes of
+// timezone/locale/notification config we'd never use here. See audit A3.
+const memberUserSelect = "id, first_name, username, photo_url"
+
 func (r *RoomRepo) GetByID(id uuid.UUID) (*model.SharedRoom, error) {
 	var room model.SharedRoom
-	err := r.db.Preload("Services").Preload("Members").Where("id = ?", id).First(&room).Error
+	err := r.db.
+		Preload("Services").
+		Preload("Members.User", func(db *gorm.DB) *gorm.DB {
+			return db.Select(memberUserSelect)
+		}).
+		Where("id = ?", id).First(&room).Error
 	if err != nil {
 		return nil, err
 	}
 	return &room, nil
 }
 
-// GetUsersByIDs returns a map of user ID → User for enriching room member data with fresh profiles.
-func (r *RoomRepo) GetUsersByIDs(ids []uint) map[uint]model.User {
-	if len(ids) == 0 {
-		return nil
-	}
-	var users []model.User
-	r.db.Where("id IN ?", ids).Find(&users)
-	m := make(map[uint]model.User, len(users))
-	for _, u := range users {
-		m[u.ID] = u
-	}
-	return m
-}
-
 func (r *RoomRepo) GetByInviteCode(code string) (*model.SharedRoom, error) {
 	var room model.SharedRoom
-	err := r.db.Preload("Services").Preload("Members").Where("invite_code = ?", code).First(&room).Error
+	err := r.db.
+		Preload("Services").
+		Preload("Members.User", func(db *gorm.DB) *gorm.DB {
+			return db.Select(memberUserSelect)
+		}).
+		Where("invite_code = ?", code).First(&room).Error
 	if err != nil {
 		return nil, err
 	}

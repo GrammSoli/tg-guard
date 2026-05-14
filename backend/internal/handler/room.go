@@ -53,14 +53,14 @@ func (h *RoomHandler) GetDetail(c fiber.Ctx) error {
 		return c.Status(403).JSON(fiber.Map{"error": "forbidden"})
 	}
 
-	// Enrich members with fresh user data (username, avatar, name may change)
-	userIDs := make([]uint, len(room.Members))
-	for i, mb := range room.Members {
-		userIDs[i] = mb.UserID
-	}
-	freshUsers := h.repo.GetUsersByIDs(userIDs)
-	for i, mb := range room.Members {
-		if u, ok := freshUsers[mb.UserID]; ok {
+	// Members.User was preloaded in a single JOIN by GetByID (see audit
+	// A3). Project the fresh first_name/username/photo_url onto the
+	// flattened RoomMember fields so the JSON response keeps the same
+	// shape the frontend expects. The cached Name/Username/Avatar are
+	// kept as fallback when the joined User is nil (soft-deleted user
+	// still listed as member).
+	for i := range room.Members {
+		if u := room.Members[i].User; u != nil {
 			room.Members[i].Name = u.FirstName
 			room.Members[i].Username = u.Username
 			room.Members[i].Avatar = u.PhotoURL
