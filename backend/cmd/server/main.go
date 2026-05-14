@@ -153,13 +153,21 @@ func main() {
 	// ── Notification Worker (created early so bot.Setup can reference it) ──
 	notifWorker := worker.NewNotificationWorker(db, n)
 
+	// Lifecycle ctx + wg created BEFORE bot.Setup so they can be threaded
+	// into the bot's background goroutines (broadcast, async export).
+	// Previously these were created later and the bot package fell back
+	// to context.Background(), causing graceful-shutdown leaks (audit C2).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var workerWG sync.WaitGroup
+
 	// ── Telegram Bot ───────────────────────────────────
 	var tgBot *tgbot.Bot
 	if !isTestMode {
 		if cfg.WebhookSecret == "" {
 			log.Fatal("WEBHOOK_SECRET is required in production")
 		}
-		tgBot, err = bot.Setup(cfg, db, notifWorker, rdb)
+		tgBot, err = bot.Setup(cfg, db, notifWorker, rdb, ctx, &workerWG)
 		if err != nil {
 			log.Fatalf("bot setup error: %v", err)
 		}
@@ -180,10 +188,6 @@ func main() {
 	// stack and restarts the loop after a cool-off instead of crashing
 	// the whole binary. workerWG lets the shutdown handler wait for all
 	// worker ticks to finish before closing DB / Redis pools.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	var workerWG sync.WaitGroup
 
 	currencyWorker := worker.NewCurrencyWorker(rdb)
 	workerWG.Add(1)
