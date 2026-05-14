@@ -52,13 +52,23 @@ func (h *RoomHandler) GetDetail(c fiber.Ctx) error {
 	if room.OwnerID != user.ID && !h.repo.IsMember(room.ID, user.ID) {
 		return c.Status(403).JSON(fiber.Map{"error": "forbidden"})
 	}
+	return c.JSON(buildRoomDetailResponse(room, user.ID))
+}
 
-	// Members.User was preloaded in a single JOIN by GetByID (see audit
-	// A3). Project the fresh first_name/username/photo_url onto the
-	// flattened RoomMember fields so the JSON response keeps the same
-	// shape the frontend expects. The cached Name/Username/Avatar are
-	// kept as fallback when the joined User is nil (soft-deleted user
-	// still listed as member).
+// buildRoomDetailResponse formats an already-loaded SharedRoom (with
+// Services + Members.User preloaded) into the GetDetail JSON shape.
+// Extracted so mutation handlers can return fresh state without
+// re-running the auth path they just passed (audit O5). The owner-only
+// mutations call h.repo.GetByID once after the write and feed the result
+// here — saves an IsMember EXISTS query per mutation, plus the redundant
+// ownership check.
+func buildRoomDetailResponse(room *model.SharedRoom, callerID uint) fiber.Map {
+	// Members.User was preloaded in a single JOIN by GetByID (audit A3).
+	// Project the fresh first_name/username/photo_url onto the flattened
+	// RoomMember fields so the JSON response keeps the same shape the
+	// frontend expects. The cached Name/Username/Avatar are kept as
+	// fallback when the joined User is nil (soft-deleted user still
+	// listed as member).
 	for i := range room.Members {
 		if u := room.Members[i].User; u != nil {
 			room.Members[i].Name = u.FirstName
@@ -66,17 +76,28 @@ func (h *RoomHandler) GetDetail(c fiber.Ctx) error {
 			room.Members[i].Avatar = u.PhotoURL
 		}
 	}
-
 	m := roomSummary(room)
 	m["owner_id"] = room.OwnerID
 	m["invite_code"] = room.InviteCode
 	m["services"] = room.Services
 	m["members"] = room.Members
-	m["is_owner"] = room.OwnerID == user.ID
+	m["is_owner"] = room.OwnerID == callerID
 	m["billing_day"] = room.BillingDay
 	m["created_at"] = room.CreatedAt
 	m["last_reminded_at"] = room.LastRemindedAt
-	return c.JSON(m)
+	return m
+}
+
+// refreshAndReturn re-reads the room and returns its detail JSON. Used
+// by owner-only mutations that already passed the ownership check and
+// must return updated state; skips the IsMember EXISTS roundtrip the
+// full GetDetail does.
+func (h *RoomHandler) refreshAndReturn(c fiber.Ctx, roomID uuid.UUID, callerID uint) error {
+	fresh, err := h.repo.GetByID(roomID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "not found"})
+	}
+	return c.JSON(buildRoomDetailResponse(fresh, callerID))
 }
 
 func (h *RoomHandler) Create(c fiber.Ctx) error {
@@ -205,7 +226,7 @@ func (h *RoomHandler) MarkPaid(c fiber.Ctx) error {
 	if err := h.repo.MarkPaid(roomID, uint(targetUID)); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "mark failed"})
 	}
-	return h.GetDetail(c)
+	return h.refreshAndReturn(c, roomID, user.ID)
 }
 
 func (h *RoomHandler) MarkUnpaid(c fiber.Ctx) error {
@@ -228,7 +249,7 @@ func (h *RoomHandler) MarkUnpaid(c fiber.Ctx) error {
 	if err := h.repo.MarkUnpaid(roomID, uint(targetUID)); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "mark failed"})
 	}
-	return h.GetDetail(c)
+	return h.refreshAndReturn(c, roomID, user.ID)
 }
 
 func (h *RoomHandler) DeleteRoom(c fiber.Ctx) error {
@@ -275,7 +296,7 @@ func (h *RoomHandler) UpdateRoom(c fiber.Ctx) error {
 		}
 		h.repo.UpdateBillingDay(roomID, day)
 	}
-	return h.GetDetail(c)
+	return h.refreshAndReturn(c, roomID, user.ID)
 }
 
 // RemoveMember allows the room owner to kick a member (not themselves).
@@ -303,7 +324,7 @@ func (h *RoomHandler) RemoveMember(c fiber.Ctx) error {
 	if err := h.repo.RemoveMember(roomID, targetUID); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "remove failed"})
 	}
-	return h.GetDetail(c)
+	return h.refreshAndReturn(c, roomID, user.ID)
 }
 
 func (h *RoomHandler) AddService(c fiber.Ctx) error {

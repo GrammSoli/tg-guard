@@ -195,8 +195,14 @@ func handleMyChatMember(ctx context.Context, update *models.Update, db *gorm.DB)
 		return
 	}
 
+	// Dirty-check the value at the SQL level so a no-op transition
+	// (user already kicked, status=kicked re-fired — Telegram does this
+	// occasionally on webhook retry) doesn't bump users.updated_at and
+	// keep churning WAL. Audit O1. RowsAffected==0 now means "no state
+	// change required"; we still log so the operator can see the event
+	// arrived.
 	res := db.WithContext(ctx).Model(&model.User{}).
-		Where("telegram_id = ?", tgID).
+		Where("telegram_id = ? AND is_active != ?", tgID, isActive).
 		Update("is_active", isActive)
 	if res.Error != nil {
 		log.Printf("[bot/my_chat_member] DB update tg=%d active=%v: %v", tgID, isActive, res.Error)
