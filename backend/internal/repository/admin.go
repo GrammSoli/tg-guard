@@ -136,9 +136,9 @@ func (r *AdminRepo) IncrementCampaign(tag string, field string) error {
 		return fmt.Errorf("invalid campaign field: %q", field)
 	}
 	return r.db.Exec(
-		`INSERT INTO traffic_campaigns (tag, `+field+`, created_at, updated_at)
-		 VALUES (?, 1, NOW(), NOW())
-		 ON CONFLICT (tag) DO UPDATE SET `+field+` = traffic_campaigns.`+field+` + 1, updated_at = NOW()`,
+		`INSERT INTO traffic_campaigns (tag, `+field+`, created_at)
+		 VALUES (?, 1, NOW())
+		 ON CONFLICT (tag) DO UPDATE SET `+field+` = traffic_campaigns.`+field+` + 1`,
 		tag,
 	).Error
 }
@@ -146,8 +146,8 @@ func (r *AdminRepo) IncrementCampaign(tag string, field string) error {
 // EnsureCampaign creates a campaign row if it doesn't exist yet (eager creation).
 func (r *AdminRepo) EnsureCampaign(tag string) error {
 	return r.db.Exec(
-		`INSERT INTO traffic_campaigns (tag, clicks, bot_starts, auths, created_at, updated_at)
-		 VALUES (?, 0, 0, 0, NOW(), NOW())
+		`INSERT INTO traffic_campaigns (tag, clicks, bot_starts, auths, created_at)
+		 VALUES (?, 0, 0, 0, NOW())
 		 ON CONFLICT (tag) DO NOTHING`,
 		tag,
 	).Error

@@ -732,7 +732,9 @@ func (p *adminPanel) handleTrafficCreate(ctx context.Context, b *tgbot.Bot, tgID
 	fullTag := "ad_" + tag
 
 	// Eagerly create the campaign row so it shows up in the list immediately.
-	p.repo.EnsureCampaign(fullTag)
+	if err := p.repo.EnsureCampaign(fullTag); err != nil {
+		log.Printf("[traffic] EnsureCampaign(%s) error: %v", fullTag, err)
+	}
 
 	// Get bot username for the link
 	botInfo, err := b.GetMe(ctx)
