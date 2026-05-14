@@ -106,8 +106,17 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 	// Upsert user — Unscoped to find soft-deleted users too.
 	var user model.User
 	isNewUser := false
-	result := db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user)
-	if result.Error == gorm.ErrRecordNotFound {
+	err := db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user).Error
+
+	switch {
+	case err == nil:
+		// User exists (active or soft-deleted). Restore if needed.
+		if user.DeletedAt.Valid {
+			db.Unscoped().Model(&user).Update("deleted_at", gorm.Expr("NULL"))
+			user.DeletedAt.Valid = false
+		}
+
+	case errors.Is(err, gorm.ErrRecordNotFound):
 		isNewUser = true
 		user = model.User{
 			TelegramID: tgUser.ID,
@@ -115,11 +124,23 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 			LastName:   tgUser.LastName,
 			Username:   tgUser.Username,
 		}
-		db.Create(&user)
-	} else if user.DeletedAt.Valid {
-		// Restore soft-deleted user on /start — gorm.Expr required, nil is skipped
-		db.Unscoped().Model(&user).Update("deleted_at", gorm.Expr("NULL"))
-		user.DeletedAt.Valid = false
+		if createErr := db.Create(&user).Error; createErr != nil {
+			// Unique constraint race — another /start created the row.
+			log.Printf("[bot/start] create failed tg=%d: %v, fallback lookup", tgUser.ID, createErr)
+			isNewUser = false
+			if fallbackErr := db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user).Error; fallbackErr != nil {
+				log.Printf("[bot/start] fallback also failed tg=%d: %v", tgUser.ID, fallbackErr)
+				return
+			}
+			if user.DeletedAt.Valid {
+				db.Unscoped().Model(&user).Update("deleted_at", gorm.Expr("NULL"))
+				user.DeletedAt.Valid = false
+			}
+		}
+
+	default:
+		log.Printf("[bot/start] db error looking up tg=%d: %v", tgUser.ID, err)
+		return
 	}
 
 	// Silently ignore banned users
@@ -137,8 +158,10 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 			tag := param
 			adminRepo.IncrementCampaign(tag, "bot_starts")
 			if isNewUser {
+				log.Printf("[bot/start] new user tg=%d, crediting signup to campaign %s", tgUser.ID, tag)
 				adminRepo.IncrementCampaign(tag, "auths")
 			}
+			// First-touch attribution — never overwrite
 			if user.TrafficSourceID == "" {
 				if err := db.Model(&user).Update("traffic_source_id", tag).Error; err != nil {
 					log.Printf("[bot] failed to update traffic_source_id for %d: %v", user.TelegramID, err)
