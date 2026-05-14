@@ -197,25 +197,10 @@ func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 
 // ── User Management ────────────────────────────────────
 
-// GetExportUsers returns every non-deleted user row for the CSV export.
-//
-// Filter is deliberately wide: only `deleted_at IS NULL` excludes truly
-// gone users. Banned (is_banned=true) and inactive (is_active=false, i.e.
-// blocked the bot) users are KEPT because the admin uses this dump for
-// ad-network retargeting — those segments are exactly who you want to
-// re-engage off-platform. Audience metrics in /admin Stats already have
-// their own narrower filters for "live audience" math; this method is
-// strictly for raw export.
-//
-// Ordered by created_at DESC so the most recent signups land at the top
-// of the spreadsheet.
-func (r *AdminRepo) GetExportUsers() ([]model.User, error) {
-	var users []model.User
-	err := r.db.Where("deleted_at IS NULL").
-		Order("created_at DESC").
-		Find(&users).Error
-	return users, err
-}
+// NOTE: A previous `GetExportUsers()` helper materialised the entire
+// users table into a single slice. It's been removed — the CSV export
+// streams rows via FindInBatches directly from bot/admin_panel.go to
+// keep peak memory bounded. See audit C4.
 
 func (r *AdminRepo) FindUserByTelegramID(tgID int64) (*model.User, error) {
 	var u model.User

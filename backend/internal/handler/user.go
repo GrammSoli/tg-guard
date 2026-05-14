@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -15,20 +17,29 @@ import (
 	"github.com/subguard/backend/internal/middleware"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/notifier"
+	"github.com/subguard/backend/internal/workerutil"
 )
 
 // UserHandler handles user profile endpoints.
+//
+// appCtx + wg are propagated to background goroutines spawned from
+// HTTP handlers (specifically ExportMe — see audit C5). The export
+// path used to block the HTTP request for tens of seconds on heavy
+// accounts; now it returns 202 immediately and the document arrives
+// in the user's Telegram DM via the notifier.
 type UserHandler struct {
 	cfg      *config.Config
 	db       *gorm.DB
 	notifier notifier.Notifier
+	appCtx   context.Context
+	wg       *sync.WaitGroup
 }
 
 // NewUserHandler is variadic for DB so existing tests that pass only cfg
 // keep working. notifier is supplied via a separate setter to avoid an
 // even longer variadic signature.
 func NewUserHandler(cfg *config.Config, db ...*gorm.DB) *UserHandler {
-	h := &UserHandler{cfg: cfg}
+	h := &UserHandler{cfg: cfg, appCtx: context.Background()}
 	if len(db) > 0 {
 		h.db = db[0]
 	}
@@ -39,6 +50,17 @@ func NewUserHandler(cfg *config.Config, db ...*gorm.DB) *UserHandler {
 // to the user. Called from main.go during bootstrap.
 func (h *UserHandler) WithNotifier(n notifier.Notifier) *UserHandler {
 	h.notifier = n
+	return h
+}
+
+// WithLifecycle wires the server lifecycle context + WaitGroup so async
+// handlers (ExportMe) can register their goroutines for graceful drain.
+// Call this from main.go after NewUserHandler/WithNotifier.
+func (h *UserHandler) WithLifecycle(appCtx context.Context, wg *sync.WaitGroup) *UserHandler {
+	if appCtx != nil {
+		h.appCtx = appCtx
+	}
+	h.wg = wg
 	return h
 }
 
@@ -160,6 +182,13 @@ func (h *UserHandler) UpdateMe(c fiber.Ctx) error {
 // Android silently swallow `<a download>` clicks on blob: URLs — the file
 // never reaches the user. Sending through the bot is the canonical TMA
 // pattern: works on every Telegram client, no quirks.
+//
+// Async behaviour (audit C5): the heavy DB reads + JSON marshal + bot
+// upload used to block the HTTP request for 5-30 seconds on accounts
+// with many rooms — long enough to time out the user's mini-app fetch
+// and tie up a connection-pool slot. We now return 202 Accepted within
+// milliseconds and do the work in a goroutine registered on workerWG so
+// graceful shutdown drains in-flight exports.
 // GET /api/v1/me/export
 func (h *UserHandler) ExportMe(c fiber.Ctx) error {
 	user := middleware.UserFromCtx(c)
@@ -173,28 +202,61 @@ func (h *UserHandler) ExportMe(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "notifier unavailable"})
 	}
 
+	// Copy the bits we need so the goroutine doesn't dereference fiber.Ctx
+	// or the *model.User after the request returns. (The middleware-set
+	// user pointer is request-scoped; safe-to-copy fields only.)
+	uid := user.ID
+	tgID := user.TelegramID
+	locale := user.Locale
+	profile := exportProfile(user)
+
+	if h.wg != nil {
+		h.wg.Add(1)
+	}
+	go func() {
+		if h.wg != nil {
+			defer h.wg.Done()
+		}
+		workerutil.Supervise("user-export", func() {
+			h.runExport(uid, tgID, locale, profile)
+		})
+	}()
+
+	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"queued": true})
+}
+
+// runExport does the heavy lifting outside the HTTP request. Errors are
+// logged + DM'd back to the user as a plain-text apology so a silent
+// failure doesn't leave the user waiting forever on a Telegram doc that
+// never arrives.
+func (h *UserHandler) runExport(uid uint, tgID int64, locale string, profile fiber.Map) {
+	ctx, cancel := context.WithTimeout(h.appCtx, 5*time.Minute)
+	defer cancel()
+
 	var subs []model.Subscription
-	if err := h.db.Where("user_id = ?", user.ID).Find(&subs).Error; err != nil {
-		log.Printf("[user.ExportMe] user=%d sub list error: %v", user.ID, err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "export failed: " + err.Error()})
+	if err := h.db.WithContext(ctx).Where("user_id = ?", uid).Find(&subs).Error; err != nil {
+		log.Printf("[user.ExportMe] user=%d sub list error: %v", uid, err)
+		h.notifyExportFailure(ctx, tgID, locale)
+		return
 	}
 
 	var rooms []model.SharedRoom
-	if err := h.db.
+	if err := h.db.WithContext(ctx).
 		Preload("Services").
 		Preload("Members").
 		Joins("JOIN room_members ON room_members.room_id = shared_rooms.id").
-		Where("room_members.user_id = ? OR shared_rooms.owner_id = ?", user.ID, user.ID).
+		Where("room_members.user_id = ? OR shared_rooms.owner_id = ?", uid, uid).
 		Group("shared_rooms.id").
 		Find(&rooms).Error; err != nil {
-		log.Printf("[user.ExportMe] user=%d room list error: %v", user.ID, err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "export failed: " + err.Error()})
+		log.Printf("[user.ExportMe] user=%d room list error: %v", uid, err)
+		h.notifyExportFailure(ctx, tgID, locale)
+		return
 	}
 
 	roomDumps := make([]fiber.Map, 0, len(rooms))
 	for _, r := range rooms {
 		role := "member"
-		if r.OwnerID == user.ID {
+		if r.OwnerID == uid {
 			role = "owner"
 		}
 		roomDumps = append(roomDumps, fiber.Map{
@@ -211,45 +273,57 @@ func (h *UserHandler) ExportMe(c fiber.Ctx) error {
 	}
 
 	dump := fiber.Map{
-		"generated_at": time.Now().UTC(),
-		"profile": fiber.Map{
-			"id":                    user.ID,
-			"telegram_id":           user.TelegramID,
-			"first_name":            user.FirstName,
-			"last_name":             user.LastName,
-			"username":              user.Username,
-			"locale":                user.Locale,
-			"timezone":              user.Timezone,
-			"base_currency":         user.BaseCurrency,
-			"is_donator":            user.IsDonator,
-			"notifications_enabled": user.NotificationsEnabled,
-			"notification_time":     user.NotificationTime,
-			"created_at":            user.CreatedAt,
-		},
+		"generated_at":  time.Now().UTC(),
+		"profile":       profile,
 		"subscriptions": subs,
 		"rooms":         roomDumps,
 	}
 
 	content, err := json.MarshalIndent(dump, "", "  ")
 	if err != nil {
-		log.Printf("[user.ExportMe] user=%d marshal error: %v", user.ID, err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "marshal failed: " + err.Error()})
+		log.Printf("[user.ExportMe] user=%d marshal error: %v", uid, err)
+		h.notifyExportFailure(ctx, tgID, locale)
+		return
 	}
 
-	filename := fmt.Sprintf("subguard-export-%d-%s.json",
-		user.TelegramID,
-		time.Now().UTC().Format("2006-01-02"),
-	)
-	caption := exportCaption(user.Locale)
-
-	if err := h.notifier.SendDocument(c.Context(), user.TelegramID, filename, content, caption); err != nil {
-		log.Printf("[user.ExportMe] user=%d send document error: %v", user.ID, err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "send failed: " + err.Error(),
-		})
+	filename := fmt.Sprintf("subguard-export-%d-%s.json", tgID, time.Now().UTC().Format("2006-01-02"))
+	if err := h.notifier.SendDocument(ctx, tgID, filename, content, exportCaption(locale)); err != nil {
+		log.Printf("[user.ExportMe] user=%d send document error: %v", uid, err)
+		h.notifyExportFailure(ctx, tgID, locale)
+		return
 	}
+	log.Printf("[user.ExportMe] user=%d exported %d subs / %d rooms", uid, len(subs), len(rooms))
+}
 
-	return c.JSON(fiber.Map{"sent": true})
+// exportProfile builds the profile sub-map. Factored out so the
+// request-scoped *model.User doesn't outlive the HTTP handler.
+func exportProfile(u *model.User) fiber.Map {
+	return fiber.Map{
+		"id":                    u.ID,
+		"telegram_id":           u.TelegramID,
+		"first_name":            u.FirstName,
+		"last_name":             u.LastName,
+		"username":              u.Username,
+		"locale":                u.Locale,
+		"timezone":              u.Timezone,
+		"base_currency":         u.BaseCurrency,
+		"is_donator":            u.IsDonator,
+		"notifications_enabled": u.NotificationsEnabled,
+		"notification_time":     u.NotificationTime,
+		"created_at":            u.CreatedAt,
+	}
+}
+
+func (h *UserHandler) notifyExportFailure(ctx context.Context, tgID int64, locale string) {
+	var msg string
+	if locale == "ru" {
+		msg = "❌ Не удалось подготовить экспорт. Попробуйте позже."
+	} else {
+		msg = "❌ Failed to prepare your export. Please try again later."
+	}
+	if err := h.notifier.SendMessage(ctx, tgID, msg); err != nil {
+		log.Printf("[user.ExportMe] failure notify to %d failed: %v", tgID, err)
+	}
 }
 
 // DeleteMe hard-deletes the authenticated user and every owned artifact:
