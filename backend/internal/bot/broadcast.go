@@ -160,6 +160,25 @@ func (bh *broadcastHandler) handleBroadcastConfirm(ctx context.Context, b *tgbot
 		return
 	}
 
+	// Guard against double-start. Telegram can deliver a callback twice
+	// (network retry, user double-tap before ack), and without this two
+	// goroutines would broadcast the same message to every user. Lock is
+	// scoped by (lang, fromChatID, messageID) so a different broadcast
+	// can still launch in parallel. TTL = 24h matches the worker's max
+	// run time; defer-cleanup releases earlier if the run finishes.
+	lockKey := fmt.Sprintf("broadcast_lock:%s:%d:%d", lang, fromChatID, messageID)
+	acquired, lockErr := bh.panel.rdb.SetNX(ctx, lockKey, "1", 24*time.Hour).Result()
+	if lockErr != nil {
+		log.Printf("[broadcast] redis SetNX error for lock: %v — proceeding without lock", lockErr)
+	} else if !acquired {
+		b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+			ChatID:    chatID,
+			MessageID: msgID,
+			Text:      "⚠️ Эта рассылка уже запущена. Подождите завершения.",
+		})
+		return
+	}
+
 	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
 		ChatID:    chatID,
 		MessageID: msgID,
@@ -171,17 +190,36 @@ func (bh *broadcastHandler) handleBroadcastConfirm(ctx context.Context, b *tgbot
 		},
 	})
 
-	// Launch the background worker. Wrapped in Supervise for panic safety.
-	go workerutil.Supervise("broadcast-copymsg", func() {
-		bh.runBroadcast(b, lang, fromChatID, messageID, tgID)
-	})
+	// Launch the background worker. Registered in workerWG so graceful
+	// shutdown waits for the in-flight broadcast to finish (or hit its
+	// drain timeout). Wrapped in Supervise for panic safety.
+	bh.panel.wg.Add(1)
+	go func() {
+		defer bh.panel.wg.Done()
+		// Release the lock even on panic — Supervise catches it but we
+		// want the next broadcast attempt to succeed without waiting
+		// 24h for the TTL.
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			bh.panel.rdb.Del(releaseCtx, lockKey)
+		}()
+		workerutil.Supervise("broadcast-copymsg", func() {
+			bh.runBroadcast(b, lang, fromChatID, messageID, tgID)
+		})
+	}()
 }
 
 // runBroadcast iterates users in batches and copies the admin's message via
 // CopyMessage API. Respects the app lifecycle context, uses FindInBatches
 // for memory efficiency, and handles Telegram 429 rate limits gracefully.
+//
+// Parent context is bh.panel.appCtx (the server lifecycle ctx) so SIGTERM
+// cancels the broadcast and main.go's workerWG drain blocks until this
+// returns. Previously this used context.Background() which would keep
+// running against a closing DB pool — see audit C2.
 func (bh *broadcastHandler) runBroadcast(b *tgbot.Bot, lang string, fromChatID int64, messageID int, adminTgID int64) {
-	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
+	ctx, cancel := context.WithTimeout(bh.panel.appCtx, 24*time.Hour)
 	defer cancel()
 
 	var sent, failed int
@@ -209,12 +247,6 @@ func (bh *broadcastHandler) runBroadcast(b *tgbot.Bot, lang string, fromChatID i
 			return errors.New("broadcast: unexpected batch dest type")
 		}
 		for _, u := range *users {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
 			if bh.copyOne(ctx, b, fromChatID, messageID, u.TelegramID) {
 				sent++
 			} else {
@@ -222,7 +254,14 @@ func (bh *broadcastHandler) runBroadcast(b *tgbot.Bot, lang string, fromChatID i
 			}
 
 			// Throttle: ~20 msg/s to stay under Telegram's rate limits.
-			time.Sleep(50 * time.Millisecond)
+			// Context-aware sleep so SIGTERM cancels within ≤50ms instead
+			// of having to wait for the full 500k-user × 50ms iteration —
+			// the bare time.Sleep blocked the shutdown drain window.
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(50 * time.Millisecond):
+			}
 		}
 		return nil
 	}).Error

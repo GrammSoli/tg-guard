@@ -8,6 +8,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
@@ -43,20 +44,33 @@ const fsmDataPrefix = "admin_data:"
 const fsmTTL = 1 * time.Hour
 
 // adminPanel handles all in-bot admin commands and callbacks.
+//
+// appCtx and wg are propagated to every spawned background goroutine
+// (broadcast worker, async export, etc.) so SIGTERM correctly cancels
+// them and main.go's workerWG drain blocks until they exit. Without
+// these the goroutines would inherit context.Background() and continue
+// writing into a closing DB/Redis pool.
 type adminPanel struct {
 	cfg       *config.Config
 	db        *gorm.DB
 	rdb       *redis.Client
 	repo      *repository.AdminRepo
 	broadcast *broadcastHandler
+	appCtx    context.Context
+	wg        *sync.WaitGroup
 }
 
-func newAdminPanel(cfg *config.Config, db *gorm.DB, rdb *redis.Client) *adminPanel {
+func newAdminPanel(cfg *config.Config, db *gorm.DB, rdb *redis.Client, appCtx context.Context, wg *sync.WaitGroup) *adminPanel {
+	if appCtx == nil {
+		appCtx = context.Background()
+	}
 	p := &adminPanel{
-		cfg:  cfg,
-		db:   db,
-		rdb:  rdb,
-		repo: repository.NewAdminRepo(db),
+		cfg:    cfg,
+		db:     db,
+		rdb:    rdb,
+		repo:   repository.NewAdminRepo(db),
+		appCtx: appCtx,
+		wg:     wg,
 	}
 	p.broadcast = newBroadcastHandler(p)
 	return p
@@ -201,6 +215,11 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 
 	chatID := cb.From.ID // DM, so chatID == user ID
 	msgID := 0
+	// cb.Message is a value-typed MaybeInaccessibleMessage; the inner
+	// .Message pointer is nil when the callback came from an
+	// inline_message_id (forwarded button / inline-mode result) — the
+	// existing nil-check catches that. On miss we fall back to the
+	// admin's own DM chat which is always safe.
 	if cb.Message.Message != nil {
 		chatID = cb.Message.Message.Chat.ID
 		msgID = cb.Message.Message.ID

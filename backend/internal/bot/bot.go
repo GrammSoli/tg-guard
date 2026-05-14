@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
@@ -25,9 +26,22 @@ import (
 // Callback prefixes imported from tgutil — shared with worker package.
 
 // Setup initializes the Telegram bot with handlers and returns the bot instance.
-func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWorker, rdb *redis.Client) (*tgbot.Bot, error) {
+//
+// appCtx is the server lifecycle context — every background goroutine the
+// bot spawns (broadcast, async CSV export, etc.) must derive its own ctx
+// from this so SIGTERM cancels them in time for the shutdown drain. wg
+// is the same WaitGroup main.go waits on so those goroutines are part of
+// the orderly drain instead of leaking past Close() of the DB/Redis pools.
+func Setup(
+	cfg *config.Config,
+	db *gorm.DB,
+	notifWorker *worker.NotificationWorker,
+	rdb *redis.Client,
+	appCtx context.Context,
+	wg *sync.WaitGroup,
+) (*tgbot.Bot, error) {
 	adminRepo := repository.NewAdminRepo(db)
-	panel := newAdminPanel(cfg, db, rdb)
+	panel := newAdminPanel(cfg, db, rdb, appCtx, wg)
 
 	opts := []tgbot.Option{
 		tgbot.WithDefaultHandler(func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
