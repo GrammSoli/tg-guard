@@ -40,7 +40,7 @@ export function SponsoredOffers() {
           const ids = offers.map((o) => o.id);
           api("/recommendations/track/view", {
             method: "POST",
-            body: JSON.stringify({ ids }),
+            body: { ids },
           }).catch(() => {}); // fire-and-forget
           observer.disconnect();
         }
@@ -53,7 +53,7 @@ export function SponsoredOffers() {
   }, [offers]);
 
   const trackClick = (id: number) => {
-    api(`/recommendations/${id}/track/click`, { method: "POST" }).catch(
+    api(`/recommendations/${id}/track/click`, { method: "POST", body: {} }).catch(
       () => {},
     );
   };

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
@@ -49,12 +50,14 @@ func (h *RecommendationsHandler) TrackView(c fiber.Ctx) error {
 		IDs []uint `json:"ids"`
 	}
 	if err := c.Bind().JSON(&body); err != nil || len(body.IDs) == 0 {
+		log.Printf("[track/view] bad payload: err=%v ids=%v", err, body.IDs)
 		return c.Status(400).JSON(fiber.Map{"error": "ids required"})
 	}
 	// Cap batch size to prevent abuse.
 	if len(body.IDs) > 50 {
 		body.IDs = body.IDs[:50]
 	}
+	log.Printf("[track/view] incrementing views for IDs: %v", body.IDs)
 	h.repo.IncrementViews(body.IDs)
 	return c.JSON(fiber.Map{"ok": true})
 }
@@ -66,6 +69,7 @@ func (h *RecommendationsHandler) TrackClick(c fiber.Ctx) error {
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid id"})
 	}
+	log.Printf("[track/click] incrementing click for ID: %d", id)
 	h.repo.IncrementClick(uint(id))
 	return c.JSON(fiber.Map{"ok": true})
 }
