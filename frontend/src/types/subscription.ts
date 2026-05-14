@@ -72,6 +72,18 @@ export interface PartnerOffer {
   reward: string;
 }
 
+/** Sponsored offer from admin panel, served by GET /api/v1/recommendations. */
+export interface SponsoredOffer {
+  id: number;
+  title: string;
+  description: string;
+  badge_text: string;
+  url: string;
+  icon_name: string;
+  target_language: "ru" | "en" | "all";
+  is_active: boolean;
+}
+
 export interface UserSettings {
   isAdmin: boolean;
   isSubscribed: boolean;

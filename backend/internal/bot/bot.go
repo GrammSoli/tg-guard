@@ -11,6 +11,7 @@ import (
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"github.com/subguard/backend/internal/config"
@@ -23,12 +24,20 @@ import (
 // Callback prefixes imported from tgutil — shared with worker package.
 
 // Setup initializes the Telegram bot with handlers and returns the bot instance.
-func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWorker) (*tgbot.Bot, error) {
+func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWorker, rdb *redis.Client) (*tgbot.Bot, error) {
 	adminRepo := repository.NewAdminRepo(db)
+	panel := newAdminPanel(cfg, db, rdb)
 
 	opts := []tgbot.Option{
 		tgbot.WithDefaultHandler(func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
-			// Fallback handler — ignore unknown updates
+			// Route admin FSM text input before dropping unknown updates.
+			if update.Message != nil && update.Message.Text != "" && cfg.IsAdmin(update.Message.From.ID) {
+				state := panel.getState(ctx, update.Message.From.ID)
+				if state != stateNone {
+					panel.handleText(ctx, b, update)
+					return
+				}
+			}
 		}),
 	}
 
@@ -65,6 +74,24 @@ func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWork
 		},
 	)
 
+	// ── Admin panel ────────────────────────────────────
+	b.RegisterHandler(tgbot.HandlerTypeMessageText, "/admin", tgbot.MatchTypeExact,
+		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
+			panel.handleAdminCommand(ctx, b, update)
+		},
+	)
+	b.RegisterHandler(tgbot.HandlerTypeMessageText, "/cancel", tgbot.MatchTypeExact,
+		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
+			panel.handleCancel(ctx, b, update)
+		},
+	)
+	// All admin_ callbacks routed through the panel
+	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, "admin_", tgbot.MatchTypePrefix,
+		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
+			panel.handleCallback(ctx, b, update)
+		},
+	)
+
 	return b, nil
 }
 
@@ -78,8 +105,10 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 
 	// Upsert user
 	var user model.User
+	isNewUser := false
 	result := db.Where("telegram_id = ?", tgUser.ID).First(&user)
 	if result.Error == gorm.ErrRecordNotFound {
+		isNewUser = true
 		user = model.User{
 			TelegramID: tgUser.ID,
 			FirstName:  tgUser.FirstName,
@@ -98,6 +127,9 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 		if strings.HasPrefix(param, "ad_") {
 			tag := param
 			adminRepo.IncrementCampaign(tag, "bot_starts")
+			if isNewUser {
+				adminRepo.IncrementCampaign(tag, "auths")
+			}
 			if user.TrafficSourceID == "" {
 				if err := db.Model(&user).Update("traffic_source_id", tag).Error; err != nil {
 					log.Printf("[bot] failed to update traffic_source_id for %d: %v", user.TelegramID, err)

@@ -26,7 +26,6 @@ function Index() {
 
   return (
     <Dashboard
-      partnerOffers={[]}
       user={user ? { name: user.name } : undefined}
     />
   );

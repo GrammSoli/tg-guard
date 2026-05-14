@@ -113,9 +113,10 @@ func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 	return r.db.Model(&model.AppSettings{}).
 		Where("id = ?", 1).
 		Updates(map[string]interface{}{
-			"cpa_enabled":          s.CPAEnabled,
-			"channel_gate_enabled": s.ChannelGateEnabled,
-			"target_channel":       s.TargetChannel,
+			"cpa_enabled":             s.CPAEnabled,
+			"recommendations_enabled": s.RecommendationsEnabled,
+			"channel_gate_enabled":    s.ChannelGateEnabled,
+			"target_channel":          s.TargetChannel,
 		}).Error
 }
 
@@ -140,4 +141,42 @@ func (r *AdminRepo) IncrementCampaign(tag string, field string) error {
 		 ON CONFLICT (tag) DO UPDATE SET `+field+` = traffic_campaigns.`+field+` + 1, updated_at = NOW()`,
 		tag,
 	).Error
+}
+
+// ── Sponsored Offers ───────────────────────────────────
+
+func (r *AdminRepo) ListOffers() ([]model.SponsoredOffer, error) {
+	var items []model.SponsoredOffer
+	err := r.db.Order("created_at DESC").Find(&items).Error
+	return items, err
+}
+
+func (r *AdminRepo) ListActiveOffers(lang string) ([]model.SponsoredOffer, error) {
+	var items []model.SponsoredOffer
+	err := r.db.Where("is_active = ? AND (target_language = ? OR target_language = 'all')", true, lang).
+		Order("created_at DESC").Find(&items).Error
+	return items, err
+}
+
+func (r *AdminRepo) CreateOffer(o *model.SponsoredOffer) error {
+	return r.db.Create(o).Error
+}
+
+func (r *AdminRepo) ToggleOffer(id uint, active bool) error {
+	return r.db.Model(&model.SponsoredOffer{}).Where("id = ?", id).Update("is_active", active).Error
+}
+
+// ── User lookup (admin) ────────────────────────────────
+
+func (r *AdminRepo) FindUserByTelegramID(tgID int64) (*model.User, error) {
+	var u model.User
+	err := r.db.Where("telegram_id = ?", tgID).First(&u).Error
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *AdminRepo) SetDonatorStatus(userID uint, isDonator bool) error {
+	return r.db.Model(&model.User{}).Where("id = ?", userID).Update("is_donator", isDonator).Error
 }
