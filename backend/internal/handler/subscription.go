@@ -129,53 +129,67 @@ func (h *SubscriptionHandler) Update(c fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "subscription not found"})
 	}
 
-	var body map[string]interface{}
+	// Pointer-typed fields so we can tell "key omitted" from "key present
+	// with zero value" — same pattern as handler/user.go UpdateMe. Audit
+	// A6: replaced the previous map[string]interface{} parsing which lost
+	// type info (e.g. amount sent as int silently dropped, period change
+	// detection broke when the frontend round-tripped the full object).
+	var body struct {
+		Name          *string  `json:"name"`
+		Brand         *string  `json:"brand"`
+		Tag           *string  `json:"tag"`
+		Note          *string  `json:"note"`
+		IconName      *string  `json:"icon_name"`
+		IconColor    *string  `json:"icon_color"`
+		Amount        *float64 `json:"amount"`
+		Currency      *string  `json:"currency"`
+		Period        *string  `json:"period"`
+		IsTrial       *bool    `json:"is_trial"`
+		IsAutoPay     *bool    `json:"is_auto_pay"`
+		NextPaymentAt *string  `json:"next_payment_at"`
+	}
 	if err := c.Bind().JSON(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
 	}
 
-	// Apply allowed updates
-	if v, ok := body["name"].(string); ok {
-		sub.Name = v
-	}
-	if v, ok := body["brand"].(string); ok {
-		sub.Brand = v
-	}
-	if v, ok := body["tag"].(string); ok {
-		sub.Tag = v
-	}
-	if v, ok := body["note"].(string); ok {
-		sub.Note = v
-	}
-	if v, ok := body["icon_name"].(string); ok {
-		sub.IconName = v
-	}
-	if v, ok := body["icon_color"].(string); ok {
-		sub.IconColor = v
-	}
-	if v, ok := body["amount"].(float64); ok {
-		sub.Amount = v
-	}
-	if v, ok := body["currency"].(string); ok {
-		sub.Currency = v
-	}
 	clearNotified := false
-	// Period: only flip clearNotified when the VALUE actually changes. The
-	// previous "key-present" check fired the dedup reset whenever the
-	// frontend round-tripped the whole object (which it does on every
-	// edit, even renaming a tag) — caused duplicate reminders. Audit A4.
-	if v, ok := body["period"].(string); ok && v != sub.Period {
-		sub.Period = v
+	if body.Name != nil {
+		sub.Name = *body.Name
+	}
+	if body.Brand != nil {
+		sub.Brand = *body.Brand
+	}
+	if body.Tag != nil {
+		sub.Tag = *body.Tag
+	}
+	if body.Note != nil {
+		sub.Note = *body.Note
+	}
+	if body.IconName != nil {
+		sub.IconName = *body.IconName
+	}
+	if body.IconColor != nil {
+		sub.IconColor = *body.IconColor
+	}
+	if body.Amount != nil {
+		sub.Amount = *body.Amount
+	}
+	if body.Currency != nil {
+		sub.Currency = *body.Currency
+	}
+	// Period: only flip clearNotified on actual value change (audit A4).
+	if body.Period != nil && *body.Period != sub.Period {
+		sub.Period = *body.Period
 		clearNotified = true
 	}
-	if v, ok := body["is_trial"].(bool); ok {
-		sub.IsTrial = v
+	if body.IsTrial != nil {
+		sub.IsTrial = *body.IsTrial
 	}
-	if v, ok := body["is_auto_pay"].(bool); ok {
-		sub.IsAutoPay = v
+	if body.IsAutoPay != nil {
+		sub.IsAutoPay = *body.IsAutoPay
 	}
-	if v, ok := body["next_payment_at"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
+	if body.NextPaymentAt != nil {
+		if t, err := time.Parse(time.RFC3339, *body.NextPaymentAt); err == nil {
 			if !t.Equal(sub.NextPaymentAt) {
 				clearNotified = true
 			}
