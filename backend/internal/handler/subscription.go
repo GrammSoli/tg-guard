@@ -159,8 +159,14 @@ func (h *SubscriptionHandler) Update(c fiber.Ctx) error {
 	if v, ok := body["currency"].(string); ok {
 		sub.Currency = v
 	}
-	if v, ok := body["period"].(string); ok {
+	clearNotified := false
+	// Period: only flip clearNotified when the VALUE actually changes. The
+	// previous "key-present" check fired the dedup reset whenever the
+	// frontend round-tripped the whole object (which it does on every
+	// edit, even renaming a tag) — caused duplicate reminders. Audit A4.
+	if v, ok := body["period"].(string); ok && v != sub.Period {
 		sub.Period = v
+		clearNotified = true
 	}
 	if v, ok := body["is_trial"].(bool); ok {
 		sub.IsTrial = v
@@ -168,7 +174,6 @@ func (h *SubscriptionHandler) Update(c fiber.Ctx) error {
 	if v, ok := body["is_auto_pay"].(bool); ok {
 		sub.IsAutoPay = v
 	}
-	clearNotified := false
 	if v, ok := body["next_payment_at"].(string); ok {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			if !t.Equal(sub.NextPaymentAt) {
@@ -176,10 +181,6 @@ func (h *SubscriptionHandler) Update(c fiber.Ctx) error {
 			}
 			sub.NextPaymentAt = t
 		}
-	}
-	if _, ok := body["period"]; ok {
-		// Period change can shift effective due semantics, treat same.
-		clearNotified = true
 	}
 
 	if err := h.repo.Update(sub, clearNotified); err != nil {
