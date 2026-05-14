@@ -38,7 +38,15 @@ export function SponsoredOffers() {
             className="bg-surface min-w-[220px] shrink-0 rounded-2xl p-4 text-left no-underline"
           >
             <div className="flex items-start justify-between">
-              <BrandIcon brand={(o.icon_name || "default") as BrandKey} size="sm" />
+              {o.icon_name?.startsWith("http") ? (
+                <img
+                  src={o.icon_name}
+                  alt={o.title}
+                  className="h-10 w-10 shrink-0 rounded-full object-cover"
+                />
+              ) : (
+                <BrandIcon brand={(o.icon_name || "default") as BrandKey} size="sm" />
+              )}
               {o.badge_text && (
                 <span className="bg-primary/15 text-primary rounded-full px-2 py-0.5 text-[10px] font-semibold">
                   {o.badge_text}

@@ -26,6 +26,7 @@ const (
 	stateAwaitOfferDesc  = "await_offer_desc"
 	stateAwaitOfferBadge = "await_offer_badge"
 	stateAwaitOfferURL   = "await_offer_url"
+	stateAwaitOfferIcon  = "await_offer_icon"
 	stateAwaitTrafficTag = "await_traffic_tag"
 )
 
@@ -291,6 +292,20 @@ func (p *adminPanel) handleText(ctx context.Context, b *tgbot.Bot, update *model
 	case stateAwaitOfferURL:
 		prev := p.getData(ctx, tgID)
 		p.setData(ctx, tgID, prev+"\n"+text)
+		p.setState(ctx, tgID, stateAwaitOfferIcon)
+		b.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID:    chatID,
+			Text:      "🎨 Введите *иконку* оффера:\n• Системное имя (напр. `netflix`)\n• URL на изображение (`https://...`)\n• `-` чтобы пропустить",
+			ParseMode: "Markdown",
+		})
+
+	case stateAwaitOfferIcon:
+		prev := p.getData(ctx, tgID)
+		icon := text
+		if icon == "-" {
+			icon = ""
+		}
+		p.setData(ctx, tgID, prev+"\n"+icon)
 		p.setState(ctx, tgID, stateNone) // lang is picked via inline button
 		b.SendMessage(ctx, &tgbot.SendMessageParams{
 			ChatID: chatID,
@@ -528,10 +543,10 @@ func (p *adminPanel) handleOfferLangPick(ctx context.Context, b *tgbot.Bot, tgID
 	}
 	lang := parts[1]
 
-	// Parse stored data: title\ndesc\nbadge\nurl
+	// Parse stored data: title\ndesc\nbadge\nurl\nicon
 	raw := p.getData(ctx, tgID)
-	lines := strings.SplitN(raw, "\n", 4)
-	if len(lines) < 4 {
+	lines := strings.SplitN(raw, "\n", 5)
+	if len(lines) < 5 {
 		b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
 			ChatID:    chatID,
 			MessageID: msgID,
@@ -546,6 +561,7 @@ func (p *adminPanel) handleOfferLangPick(ctx context.Context, b *tgbot.Bot, tgID
 		Description:    lines[1],
 		BadgeText:      lines[2],
 		URL:            lines[3],
+		IconName:       lines[4],
 		TargetLanguage: lang,
 		IsActive:       true,
 	}
