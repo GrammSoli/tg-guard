@@ -192,21 +192,33 @@ func handleRenewCallback(ctx context.Context, b *tgbot.Bot, update *models.Updat
 	prev := sub.NextPaymentAt
 	next := advancePayment(prev, sub.Period)
 
-	// Persist: new payment date + clear notified_at so the worker can
-	// fire again before the *next* renewal. If this was a trial, convert
-	// it to a regular paid subscription.
+	// Persist with an optimistic lock: only update if NextPaymentAt is
+	// still `prev`. A racing duplicate callback (Telegram retry or user
+	// double-tap before AnswerCallbackQuery acks) would otherwise read
+	// the already-advanced date and shift another full period. Adding
+	// `WHERE next_payment_at = ?` makes the SECOND update affect zero
+	// rows; we detect via RowsAffected and treat as "already renewed".
 	updates := map[string]interface{}{
 		"next_payment_at": next,
 		"notified_at":     nil,
 	}
 	if sub.IsTrial {
 		updates["is_trial"] = false
+		updates["trial_ends_at"] = nil // clear historical trial mark on conversion
 	}
-	if err := db.WithContext(ctx).Model(&model.Subscription{}).
-		Where("id = ?", sub.ID).
-		Updates(updates).Error; err != nil {
-		log.Printf("[bot.renew] update error: %v", err)
+	result := db.WithContext(ctx).Model(&model.Subscription{}).
+		Where("id = ? AND next_payment_at = ?", sub.ID, prev).
+		Updates(updates)
+	if result.Error != nil {
+		log.Printf("[bot.renew] update error: %v", result.Error)
 		answerAndLog("save failed")
+		return
+	}
+	if result.RowsAffected == 0 {
+		// Another invocation already advanced the date. Ack the spinner
+		// and bail — don't re-edit the message either, it's already in a
+		// confirmation state.
+		answerAndLog(renewToastLabel(owner.Locale))
 		return
 	}
 	sub.NextPaymentAt = next

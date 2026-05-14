@@ -111,6 +111,9 @@ export function NotificationsSheet({ open, onOpenChange }: Props) {
   // browser's IANA tz differs from what we have on file, push it. No toast,
   // no UI feedback — this is purely housekeeping. If it fails we just drop
   // it; the worker falls back to UTC.
+  // updateSettings is a Zustand action — stable ref, omitted from deps
+  // so HMR / strict-mode doesn't trigger a redundant tz round-trip.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open) return;
     const browserTz = detectBrowserTimezone();
@@ -119,7 +122,7 @@ export function NotificationsSheet({ open, onOpenChange }: Props) {
         console.warn("[notifications] tz sync failed", err);
       });
     }
-  }, [open, storedTimezone, updateSettings]);
+  }, [open, storedTimezone]);
 
   const reportError = (err: unknown) => {
     const reason = (err as Error)?.message ?? "unknown";

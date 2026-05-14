@@ -105,13 +105,26 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 				})
 			}
 		} else {
-			// Update profile fields that may have changed
-			db.Model(&user).Updates(map[string]interface{}{
-				"first_name": tgUser.FirstName,
-				"last_name":  tgUser.LastName,
-				"username":   tgUser.Username,
-				"photo_url":  tgUser.PhotoURL,
-			})
+			// Update profile fields that may have changed. Skip empty
+			// values so a transient empty response from Telegram (e.g.
+			// CDN burp returning a blank photo_url) can't overwrite the
+			// existing stored value with "".
+			profileUpdates := map[string]interface{}{}
+			if tgUser.FirstName != "" {
+				profileUpdates["first_name"] = tgUser.FirstName
+			}
+			if tgUser.LastName != "" {
+				profileUpdates["last_name"] = tgUser.LastName
+			}
+			if tgUser.Username != "" {
+				profileUpdates["username"] = tgUser.Username
+			}
+			if tgUser.PhotoURL != "" {
+				profileUpdates["photo_url"] = tgUser.PhotoURL
+			}
+			if len(profileUpdates) > 0 {
+				db.Model(&user).Updates(profileUpdates)
+			}
 		}
 
 		c.Locals(contextKeyUser, &user)

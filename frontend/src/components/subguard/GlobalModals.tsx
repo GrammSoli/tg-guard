@@ -29,10 +29,13 @@ export function GlobalModals() {
   const updateSubscription = useSubscriptionStore((s) => s.updateSubscription);
   const deleteSubscription = useSubscriptionStore((s) => s.deleteSubscription);
 
-  // Auto-fetch room detail when a room is opened
+  // Auto-fetch room detail when a room is opened.
+  // fetchDetail is a Zustand action — stable ref, listing it in deps
+  // just risks HMR double-fires.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (activeRoomId) fetchDetail(activeRoomId);
-  }, [activeRoomId, fetchDetail]);
+  }, [activeRoomId]);
 
   const handleSave = async (data: Omit<Subscription, "id"> & { id?: string }) => {
     try {

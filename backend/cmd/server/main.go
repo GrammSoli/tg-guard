@@ -110,10 +110,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("redis url error: %v", err)
 	}
+	// Pool tuning — env-overridable for staging/load tests. Defaults sized
+	// for ~20 concurrent backend handlers + workers; bump POOL_SIZE if you
+	// see "max number of clients reached" in Redis logs.
+	opt.PoolSize = envInt("REDIS_POOL_SIZE", 20)
+	opt.MinIdleConns = envInt("REDIS_MIN_IDLE", 5)
+	opt.ReadTimeout = 10 * time.Second
+	opt.WriteTimeout = 10 * time.Second
 	rdb := redis.NewClient(opt)
-	if err := rdb.Ping(context.Background()).Err(); err != nil {
+	// Bound the startup Ping so a hung Redis can't wedge the binary.
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := rdb.Ping(pingCtx).Err(); err != nil {
+		pingCancel()
 		log.Fatalf("redis connection error: %v", err)
 	}
+	pingCancel()
 	log.Println("redis connected")
 
 	// ── Notifier (real TG or mock for tests) ─────────

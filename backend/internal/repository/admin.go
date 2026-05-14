@@ -74,8 +74,23 @@ func (r *AdminRepo) CreateCatalogItem(item *model.ServiceCatalog) error {
 	return r.db.Create(item).Error
 }
 
+// UpdateCatalogItem writes an explicit field list so unset Optional
+// fields (PartnerLink, PromoText, BrandColor) aren't overwritten with
+// "" when the caller sends a partial body. .Save() would zero them.
 func (r *AdminRepo) UpdateCatalogItem(item *model.ServiceCatalog) error {
-	return r.db.Save(item).Error
+	return r.db.Model(&model.ServiceCatalog{}).
+		Where("id = ?", item.ID).
+		Updates(map[string]interface{}{
+			"name":             item.Name,
+			"category":         item.Category,
+			"domain":           item.Domain,
+			"brand_color":      item.BrandColor,
+			"default_amount":   item.DefaultAmount,
+			"default_currency": item.DefaultCurrency,
+			"partner_link":     item.PartnerLink,
+			"promo_text":       item.PromoText,
+			"active":           item.Active,
+		}).Error
 }
 
 func (r *AdminRepo) DeleteCatalogItem(id string) error {
@@ -90,9 +105,18 @@ func (r *AdminRepo) GetSettings() (*model.AppSettings, error) {
 	return &s, err
 }
 
+// UpdateSettings persists global app settings. Uses explicit fields via
+// .Updates() rather than .Save() to avoid resetting unset string fields
+// to "" on partial bodies. The singleton row has id=1.
 func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 	s.ID = 1
-	return r.db.Save(s).Error
+	return r.db.Model(&model.AppSettings{}).
+		Where("id = ?", 1).
+		Updates(map[string]interface{}{
+			"cpa_enabled":          s.CPAEnabled,
+			"channel_gate_enabled": s.ChannelGateEnabled,
+			"target_channel":       s.TargetChannel,
+		}).Error
 }
 
 // ── Traffic Campaigns ──────────────────────────────────
