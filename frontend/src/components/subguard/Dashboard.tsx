@@ -274,11 +274,9 @@ export function Dashboard({ user }: Props) {
                       )}
                     </div>
                   )}
-                  {settings.cpaActive && (
-                    <div className="mt-8">
-                      <SponsoredOffers />
-                    </div>
-                  )}
+                  <div className="mt-8">
+                    <SponsoredOffers />
+                  </div>
                 </>
               )}
             </>
