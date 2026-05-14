@@ -83,10 +83,18 @@ func (r *RoomRepo) AddMember(member *model.RoomMember) error {
 	return r.db.Create(member).Error
 }
 
+// IsMember reports whether userID belongs to the given room. The hot path
+// (GetDetail / MarkPaid / Remind / RemoveMember) calls this on every
+// authenticated room interaction, so we use EXISTS — the PostgreSQL planner
+// short-circuits on the first matching row instead of COUNT-ing the entire
+// matching set. See audit A2 — at 100k DAU this is a measurable saving.
 func (r *RoomRepo) IsMember(roomID uuid.UUID, userID uint) bool {
-	var count int64
-	r.db.Model(&model.RoomMember{}).Where("room_id = ? AND user_id = ?", roomID, userID).Count(&count)
-	return count > 0
+	var exists bool
+	r.db.Raw(
+		`SELECT EXISTS(SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?)`,
+		roomID, userID,
+	).Scan(&exists)
+	return exists
 }
 
 func (r *RoomRepo) MarkPaid(roomID uuid.UUID, userID uint) error {
