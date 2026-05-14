@@ -80,12 +80,17 @@ func newAdminPanel(cfg *config.Config, db *gorm.DB, rdb *redis.Client, appCtx co
 // ── FSM helpers ────────────────────────────────────────
 
 func (p *adminPanel) setState(ctx context.Context, tgID int64, state string) {
-	key := fsmKeyPrefix + strconv.FormatInt(tgID, 10)
+	idStr := strconv.FormatInt(tgID, 10)
+	key := fsmKeyPrefix + idStr
 	if state == stateNone {
 		p.rdb.Del(ctx, key)
 		return
 	}
 	p.rdb.Set(ctx, key, state, fsmTTL)
+	// Mirror the TTL onto the data key so a multi-step flow that only
+	// writes data between state transitions doesn't let the state expire
+	// underneath it.
+	p.rdb.Expire(ctx, fsmDataPrefix+idStr, fsmTTL)
 }
 
 func (p *adminPanel) getState(ctx context.Context, tgID int64) string {
@@ -97,9 +102,14 @@ func (p *adminPanel) getState(ctx context.Context, tgID int64) string {
 	return val
 }
 
+// setData stores partial-flow data AND refreshes the state-key TTL. Long
+// multi-step admin flows (broadcast composition, offer creation) used to
+// expire mid-flow if the user paused near the 1h boundary because each
+// setData call only touched the data key — see audit A1.
 func (p *adminPanel) setData(ctx context.Context, tgID int64, data string) {
-	key := fsmDataPrefix + strconv.FormatInt(tgID, 10)
-	p.rdb.Set(ctx, key, data, fsmTTL)
+	idStr := strconv.FormatInt(tgID, 10)
+	p.rdb.Set(ctx, fsmDataPrefix+idStr, data, fsmTTL)
+	p.rdb.Expire(ctx, fsmKeyPrefix+idStr, fsmTTL)
 }
 
 func (p *adminPanel) getData(ctx context.Context, tgID int64) string {
