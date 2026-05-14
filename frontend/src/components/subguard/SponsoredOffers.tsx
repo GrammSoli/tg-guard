@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpRight } from "lucide-react";
 import { api } from "@/lib/api";
@@ -11,27 +11,46 @@ import type { BrandKey } from "@/types/subscription";
  * If the API returns an empty array (globally disabled or no matching offers),
  * the entire section is hidden.
  *
- * Tracks impression (view) on mount and click on CTA tap.
+ * Impressions are tracked via IntersectionObserver — fires once when ≥50% of
+ * the section is visible. Clicks are tracked on CTA tap (fire-and-forget).
  */
 export function SponsoredOffers() {
   const { t } = useTranslation();
   const [offers, setOffers] = useState<SponsoredOffer[]>([]);
+  const sectionRef = useRef<HTMLElement>(null);
+  const viewedRef = useRef(false);
 
   useEffect(() => {
     api<SponsoredOffer[]>("/recommendations")
-      .then((data) => {
-        setOffers(data);
-        // Track impressions in the background
-        if (data.length > 0) {
-          const ids = data.map((o) => o.id);
+      .then(setOffers)
+      .catch(() => setOffers([]));
+  }, []);
+
+  // Track impressions when section scrolls into view (once per session).
+  useEffect(() => {
+    if (offers.length === 0 || viewedRef.current) return;
+
+    const el = sectionRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !viewedRef.current) {
+          viewedRef.current = true;
+          const ids = offers.map((o) => o.id);
           api("/recommendations/track/view", {
             method: "POST",
             body: JSON.stringify({ ids }),
           }).catch(() => {}); // fire-and-forget
+          observer.disconnect();
         }
-      })
-      .catch(() => setOffers([]));
-  }, []);
+      },
+      { threshold: 0.5 },
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [offers]);
 
   const trackClick = (id: number) => {
     api(`/recommendations/${id}/track/click`, { method: "POST" }).catch(
@@ -42,7 +61,7 @@ export function SponsoredOffers() {
   if (offers.length === 0) return null;
 
   return (
-    <section className="px-5">
+    <section ref={sectionRef} className="px-5">
       <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {t("sponsored.title")}
       </p>
