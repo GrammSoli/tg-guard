@@ -42,19 +42,22 @@ const fsmTTL = 1 * time.Hour
 
 // adminPanel handles all in-bot admin commands and callbacks.
 type adminPanel struct {
-	cfg  *config.Config
-	db   *gorm.DB
-	rdb  *redis.Client
-	repo *repository.AdminRepo
+	cfg       *config.Config
+	db        *gorm.DB
+	rdb       *redis.Client
+	repo      *repository.AdminRepo
+	broadcast *broadcastHandler
 }
 
 func newAdminPanel(cfg *config.Config, db *gorm.DB, rdb *redis.Client) *adminPanel {
-	return &adminPanel{
+	p := &adminPanel{
 		cfg:  cfg,
 		db:   db,
 		rdb:  rdb,
 		repo: repository.NewAdminRepo(db),
 	}
+	p.broadcast = newBroadcastHandler(p)
+	return p
 }
 
 // ── FSM helpers ────────────────────────────────────────
@@ -125,6 +128,9 @@ func (p *adminPanel) sendMainMenu(ctx context.Context, b *tgbot.Bot, chatID int6
 			{
 				{Text: "💰 Спонсоры", CallbackData: "admin_sponsors"},
 				{Text: "🔗 Трафик", CallbackData: "admin_traffic"},
+			},
+			{
+				{Text: "📢 Рассылка", CallbackData: "admin_broadcast"},
 			},
 		},
 	}
@@ -205,6 +211,15 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 
 	case data == "admin_traffic":
 		p.handleTrafficMenu(ctx, b, chatID, msgID)
+
+	case data == "admin_broadcast":
+		p.broadcast.handleBroadcastStart(ctx, b, chatID, msgID)
+
+	case strings.HasPrefix(data, "broadcast_lang_"):
+		p.broadcast.handleBroadcastLang(ctx, b, cb.From.ID, data, chatID, msgID)
+
+	case data == "broadcast_confirm":
+		p.broadcast.handleBroadcastConfirm(ctx, b, cb.From.ID, chatID, msgID)
 
 	case data == "admin_recs_toggle":
 		p.handleRecsToggle(ctx, b, chatID, msgID)
@@ -343,6 +358,9 @@ func (p *adminPanel) handleText(ctx context.Context, b *tgbot.Bot, update *model
 
 	case stateAwaitTrafficTag:
 		p.handleTrafficCreate(ctx, b, tgID, chatID, text)
+
+	case stateAwaitBroadcastMsg:
+		p.broadcast.handleBroadcastContent(ctx, b, update)
 	}
 }
 

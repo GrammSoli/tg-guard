@@ -31,11 +31,20 @@ func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWork
 	opts := []tgbot.Option{
 		tgbot.WithDefaultHandler(func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
 			// Route admin FSM text input before dropping unknown updates.
-			if update.Message != nil && update.Message.Text != "" && cfg.IsAdmin(update.Message.From.ID) {
+			if update.Message != nil && update.Message.From != nil && cfg.IsAdmin(update.Message.From.ID) {
 				state := panel.getState(ctx, update.Message.From.ID)
 				if state != stateNone {
-					panel.handleText(ctx, b, update)
-					return
+					// Text messages go through the regular FSM text router.
+					if update.Message.Text != "" {
+						panel.handleText(ctx, b, update)
+						return
+					}
+					// Non-text messages (photo/video/document/audio/sticker)
+					// are only relevant for the broadcast content capture step.
+					if state == stateAwaitBroadcastMsg {
+						panel.broadcast.handleBroadcastContent(ctx, b, update)
+						return
+					}
 				}
 			}
 		}),

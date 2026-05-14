@@ -316,3 +316,23 @@ func (r *AdminRepo) IncrementClick(id uint) error {
 		Where("id = ?", id).
 		UpdateColumn("clicks", gorm.Expr("clicks + 1")).Error
 }
+
+// ── Broadcast ──────────────────────────────────────────
+
+// CountBroadcastRecipients returns the count of eligible users for a
+// broadcast filtered by language segment. Excludes banned and soft-deleted
+// users. When lang == "en", includes users whose locale is empty or NULL
+// (fallback — undetected locale defaults to English audience).
+func (r *AdminRepo) CountBroadcastRecipients(lang string) (int64, error) {
+	var count int64
+	q := r.db.Model(&model.User{}).Where("is_banned = false AND deleted_at IS NULL")
+	switch lang {
+	case "ru":
+		q = q.Where("LOWER(locale) = 'ru'")
+	case "en":
+		q = q.Where("LOWER(locale) = 'en' OR locale IS NULL OR locale = ''")
+	}
+	// "all" — no extra filter
+	err := q.Count(&count).Error
+	return count, err
+}
