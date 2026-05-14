@@ -166,6 +166,34 @@ func (r *AdminRepo) ToggleOffer(id uint, active bool) error {
 	return r.db.Model(&model.SponsoredOffer{}).Where("id = ?", id).Update("is_active", active).Error
 }
 
+func (r *AdminRepo) GetOffer(id uint) (*model.SponsoredOffer, error) {
+	var o model.SponsoredOffer
+	err := r.db.First(&o, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+func (r *AdminRepo) DeleteOffer(id uint) error {
+	return r.db.Delete(&model.SponsoredOffer{}, id).Error
+}
+
+func (r *AdminRepo) IncrementViews(ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.Model(&model.SponsoredOffer{}).
+		Where("id IN ?", ids).
+		UpdateColumn("views", gorm.Expr("views + 1")).Error
+}
+
+func (r *AdminRepo) IncrementClick(id uint) error {
+	return r.db.Model(&model.SponsoredOffer{}).
+		Where("id = ?", id).
+		UpdateColumn("clicks", gorm.Expr("clicks + 1")).Error
+}
+
 // ── User lookup (admin) ────────────────────────────────
 
 func (r *AdminRepo) FindUserByTelegramID(tgID int64) (*model.User, error) {

@@ -174,5 +174,7 @@ type SponsoredOffer struct {
 	IconName       string    `gorm:"size:512" json:"icon_name"`
 	TargetLanguage string    `gorm:"size:5;default:'all'" json:"target_language"`
 	IsActive       bool      `gorm:"default:true" json:"is_active"`
+	Views          uint      `gorm:"default:0" json:"views"`
+	Clicks         uint      `gorm:"default:0" json:"clicks"`
 	CreatedAt      time.Time `json:"created_at"`
 }

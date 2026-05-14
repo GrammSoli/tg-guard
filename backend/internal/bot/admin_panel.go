@@ -215,8 +215,14 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	case data == "admin_traffic_new":
 		p.handleTrafficNewPrompt(ctx, b, cb.From.ID, chatID, msgID)
 
+	case strings.HasPrefix(data, "admin_offer_view:"):
+		p.handleOfferView(ctx, b, data, chatID, msgID)
+
 	case strings.HasPrefix(data, "admin_offer_toggle:"):
 		p.handleOfferToggle(ctx, b, data, chatID, msgID)
+
+	case strings.HasPrefix(data, "admin_offer_del:"):
+		p.handleOfferDelete(ctx, b, data, chatID, msgID)
 
 	case strings.HasPrefix(data, "admin_premium_grant:"):
 		p.handlePremiumChange(ctx, b, data, true, chatID, msgID)
@@ -486,7 +492,7 @@ func (p *adminPanel) handleSponsorsMenu(ctx context.Context, b *tgbot.Bot, chatI
 		langBadge := "[" + strings.ToUpper(o.TargetLanguage) + "]"
 		label := fmt.Sprintf("%s %s %s", status, langBadge, o.Title)
 		buttons = append(buttons, []models.InlineKeyboardButton{
-			{Text: label, CallbackData: fmt.Sprintf("admin_offer_toggle:%d:%v", o.ID, !o.IsActive)},
+			{Text: label, CallbackData: fmt.Sprintf("admin_offer_view:%d", o.ID)},
 		})
 	}
 
@@ -513,15 +519,93 @@ func (p *adminPanel) handleRecsToggle(ctx context.Context, b *tgbot.Bot, chatID 
 	p.handleSponsorsMenu(ctx, b, chatID, msgID)
 }
 
-func (p *adminPanel) handleOfferToggle(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
-	// data = "admin_offer_toggle:42:true"
-	parts := strings.SplitN(data, ":", 3)
-	if len(parts) < 3 {
+func (p *adminPanel) handleOfferView(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
+	// data = "admin_offer_view:42"
+	parts := strings.SplitN(data, ":", 2)
+	if len(parts) < 2 {
 		return
 	}
 	id, _ := strconv.ParseUint(parts[1], 10, 64)
-	active := parts[2] == "true"
-	p.repo.ToggleOffer(uint(id), active)
+	offer, err := p.repo.GetOffer(uint(id))
+	if err != nil {
+		b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+			ChatID: chatID, MessageID: msgID,
+			Text: "❌ Оффер не найден.",
+		})
+		return
+	}
+
+	status := "✅ Активен"
+	if !offer.IsActive {
+		status = "❌ Выключен"
+	}
+
+	var ctr float64
+	if offer.Views > 0 {
+		ctr = float64(offer.Clicks) / float64(offer.Views) * 100
+	}
+
+	text := fmt.Sprintf(`🏷 *Оффер:* %s
+🌍 *Аудитория:* %s
+
+📊 *Статистика:*
+👁 Показы: %d | 🖱 Клики: %d | 📈 CTR: %.1f%%
+
+🚦 *Статус:* %s`,
+		escapeMarkdownLite(offer.Title),
+		strings.ToUpper(offer.TargetLanguage),
+		offer.Views, offer.Clicks, ctr,
+		status)
+
+	toggleLabel := "❌ Выключить"
+	if !offer.IsActive {
+		toggleLabel = "✅ Включить"
+	}
+
+	kb := models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: toggleLabel, CallbackData: fmt.Sprintf("admin_offer_toggle:%d", offer.ID)},
+				{Text: "🗑 Удалить", CallbackData: fmt.Sprintf("admin_offer_del:%d", offer.ID)},
+			},
+			{{Text: "🔙 К списку", CallbackData: "admin_sponsors"}},
+		},
+	}
+
+	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   msgID,
+		Text:        text,
+		ParseMode:   "Markdown",
+		ReplyMarkup: &kb,
+	})
+}
+
+func (p *adminPanel) handleOfferToggle(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
+	// data = "admin_offer_toggle:42"
+	parts := strings.SplitN(data, ":", 2)
+	if len(parts) < 2 {
+		return
+	}
+	id, _ := strconv.ParseUint(parts[1], 10, 64)
+	offer, err := p.repo.GetOffer(uint(id))
+	if err != nil {
+		return
+	}
+	p.repo.ToggleOffer(uint(id), !offer.IsActive)
+	// Re-render the detail card with updated status
+	p.handleOfferView(ctx, b, fmt.Sprintf("admin_offer_view:%d", id), chatID, msgID)
+}
+
+func (p *adminPanel) handleOfferDelete(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
+	// data = "admin_offer_del:42"
+	parts := strings.SplitN(data, ":", 2)
+	if len(parts) < 2 {
+		return
+	}
+	id, _ := strconv.ParseUint(parts[1], 10, 64)
+	p.repo.DeleteOffer(uint(id))
+	// Return to sponsors list
 	p.handleSponsorsMenu(ctx, b, chatID, msgID)
 }
 

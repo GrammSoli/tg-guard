@@ -260,6 +260,8 @@ func main() {
 	// Recommendations (sponsored offers)
 	recsH := handler.NewRecommendationsHandler(db)
 	auth.Get("/recommendations", recsH.List)
+	auth.Post("/recommendations/track/view", recsH.TrackView)
+	auth.Post("/recommendations/:id/track/click", recsH.TrackClick)
 
 	// Rooms
 	roomH := handler.NewRoomHandler(db, n)

@@ -10,6 +10,8 @@ import type { BrandKey } from "@/types/subscription";
  * SponsoredOffers fetches and displays admin-created promotional cards.
  * If the API returns an empty array (globally disabled or no matching offers),
  * the entire section is hidden.
+ *
+ * Tracks impression (view) on mount and click on CTA tap.
  */
 export function SponsoredOffers() {
   const { t } = useTranslation();
@@ -17,9 +19,25 @@ export function SponsoredOffers() {
 
   useEffect(() => {
     api<SponsoredOffer[]>("/recommendations")
-      .then(setOffers)
+      .then((data) => {
+        setOffers(data);
+        // Track impressions in the background
+        if (data.length > 0) {
+          const ids = data.map((o) => o.id);
+          api("/recommendations/track/view", {
+            method: "POST",
+            body: JSON.stringify({ ids }),
+          }).catch(() => {}); // fire-and-forget
+        }
+      })
       .catch(() => setOffers([]));
   }, []);
+
+  const trackClick = (id: number) => {
+    api(`/recommendations/${id}/track/click`, { method: "POST" }).catch(
+      () => {},
+    );
+  };
 
   if (offers.length === 0) return null;
 
@@ -36,6 +54,7 @@ export function SponsoredOffers() {
             target="_blank"
             rel="noopener noreferrer"
             className="bg-surface min-w-[220px] shrink-0 rounded-2xl p-4 text-left no-underline"
+            onClick={() => trackClick(o.id)}
           >
             <div className="flex items-start justify-between">
               {o.icon_name?.startsWith("http") ? (
