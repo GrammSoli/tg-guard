@@ -62,7 +62,6 @@ func (p *adminPanel) setState(ctx context.Context, tgID int64, state string) {
 	key := fsmKeyPrefix + strconv.FormatInt(tgID, 10)
 	if state == stateNone {
 		p.rdb.Del(ctx, key)
-		p.rdb.Del(ctx, fsmDataPrefix+strconv.FormatInt(tgID, 10))
 		return
 	}
 	p.rdb.Set(ctx, key, state, fsmTTL)
@@ -88,8 +87,14 @@ func (p *adminPanel) getData(ctx context.Context, tgID int64) string {
 	return val
 }
 
+// clearState wipes both the FSM state and any accumulated data.
+// Use this for explicit resets (/cancel, /admin, admin_back).
+// For intermediate transitions (e.g. URL step → waiting for lang callback)
+// use setState(stateNone) which preserves data.
 func (p *adminPanel) clearState(ctx context.Context, tgID int64) {
-	p.setState(ctx, tgID, stateNone)
+	idStr := strconv.FormatInt(tgID, 10)
+	p.rdb.Del(ctx, fsmKeyPrefix+idStr)
+	p.rdb.Del(ctx, fsmDataPrefix+idStr)
 }
 
 // ── /admin — Main Menu ─────────────────────────────────
