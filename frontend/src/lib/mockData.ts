@@ -1,4 +1,4 @@
-import type { PartnerOffer, Subscription, UserSettings } from "@/types/subscription";
+import type { Subscription, UserSettings } from "@/types/subscription";
 
 const today = new Date();
 const inDays = (d: number) => {
@@ -91,25 +91,6 @@ export const mockSubscriptions: Subscription[] = [
     trial_ends_at: null,
     is_auto_pay: false,
     logoUrl: "https://thesvg.org/icons/disney/default.svg",
-  },
-];
-
-export const mockPartnerOffers: PartnerOffer[] = [
-  {
-    id: "p1",
-    name: "Apple One",
-    brand: "apple",
-    tagline: "Bundle 6 services, save 40%",
-    cta_url: "#",
-    reward: "+$5 cashback",
-  },
-  {
-    id: "p2",
-    name: "Spotify Family",
-    brand: "spotify",
-    tagline: "Up to 6 accounts",
-    cta_url: "#",
-    reward: "1 month free",
   },
 ];
 

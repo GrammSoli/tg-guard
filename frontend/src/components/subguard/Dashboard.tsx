@@ -3,7 +3,7 @@ import { useDeepLinkHandler } from "@/hooks/use-deep-link";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import type { PartnerOffer, Subscription } from "@/types/subscription";
+import type { Subscription } from "@/types/subscription";
 import type { RoomSummary } from "@/types/room";
 import type { ServiceCategory } from "@/lib/mockData";
 import { convertCurrency } from "@/lib/currencyRates";
@@ -15,7 +15,7 @@ import { SummaryHeader } from "./SummaryHeader";
 import { FilterBar } from "./FilterBar";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { SwipeableSubscriptionCard } from "./SwipeableSubscriptionCard";
-import { PartnerOffers } from "./PartnerOffers";
+import { SponsoredOffers } from "./SponsoredOffers";
 import { TabBar, type TabKey } from "./TabBar";
 
 import { AnalyticsView } from "./AnalyticsView";
@@ -37,11 +37,10 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useModalStore } from "@/stores/modalStore";
 
 interface Props {
-  partnerOffers: PartnerOffer[];
   user?: { name: string };
 }
 
-export function Dashboard({ partnerOffers, user }: Props) {
+export function Dashboard({ user }: Props) {
   // Granular Zustand selectors so unrelated store updates (e.g. activeDetail
   // changing) don't re-render the dashboard.
   const settings = useSettingsStore((s) => s.settings);
@@ -277,7 +276,7 @@ export function Dashboard({ partnerOffers, user }: Props) {
                   )}
                   {settings.cpaActive && (
                     <div className="mt-8">
-                      <PartnerOffers offers={partnerOffers} />
+                      <SponsoredOffers />
                     </div>
                   )}
                 </>

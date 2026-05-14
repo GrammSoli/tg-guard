@@ -89,6 +89,7 @@ func main() {
 			&model.TrafficCampaign{},
 			&model.AppSettings{},
 			&model.Donation{},
+			&model.SponsoredOffer{},
 		); err != nil {
 			log.Fatalf("migration error: %v", err)
 		}
@@ -146,7 +147,7 @@ func main() {
 		if cfg.WebhookSecret == "" {
 			log.Fatal("WEBHOOK_SECRET is required in production")
 		}
-		tgBot, err = bot.Setup(cfg, db, notifWorker)
+		tgBot, err = bot.Setup(cfg, db, notifWorker, rdb)
 		if err != nil {
 			log.Fatalf("bot setup error: %v", err)
 		}
@@ -255,6 +256,10 @@ func main() {
 	auth.Post("/subscriptions", subH.Create)
 	auth.Patch("/subscriptions/:id", subH.Update)
 	auth.Delete("/subscriptions/:id", subH.Delete)
+
+	// Recommendations (sponsored offers)
+	recsH := handler.NewRecommendationsHandler(db)
+	auth.Get("/recommendations", recsH.List)
 
 	// Rooms
 	roomH := handler.NewRoomHandler(db, n)

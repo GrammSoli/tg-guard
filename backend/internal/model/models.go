@@ -146,10 +146,11 @@ type TrafficCampaign struct {
 
 // AppSettings stores global feature toggles (single-row table).
 type AppSettings struct {
-	ID                 uint   `gorm:"primaryKey" json:"id"`
-	CPAEnabled         bool   `gorm:"default:true" json:"cpa_enabled"`
-	ChannelGateEnabled bool   `gorm:"default:false" json:"channel_gate_enabled"`
-	TargetChannel      string `gorm:"size:64" json:"target_channel"`
+	ID                     uint   `gorm:"primaryKey" json:"id"`
+	CPAEnabled             bool   `gorm:"default:true" json:"cpa_enabled"`
+	RecommendationsEnabled bool   `gorm:"default:true" json:"recommendations_enabled"`
+	ChannelGateEnabled     bool   `gorm:"default:false" json:"channel_gate_enabled"`
+	TargetChannel          string `gorm:"size:64" json:"target_channel"`
 }
 
 // Donation logs a successful Telegram Stars payment.
@@ -159,4 +160,19 @@ type Donation struct {
 	TelegramID int64     `json:"telegram_id"`
 	Amount     int       `json:"amount"` // in Telegram Stars
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+// SponsoredOffer is an admin-created promotional card displayed in the
+// "Recommended" section of the dashboard. TargetLanguage controls which
+// users see it: "ru", "en", or "all".
+type SponsoredOffer struct {
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	Title          string    `gorm:"not null;size:128" json:"title"`
+	Description    string    `gorm:"size:255" json:"description"`
+	BadgeText      string    `gorm:"size:32" json:"badge_text"`
+	URL            string    `gorm:"size:512;not null" json:"url"`
+	IconName       string    `gorm:"size:32" json:"icon_name"`
+	TargetLanguage string    `gorm:"size:5;default:'all'" json:"target_language"`
+	IsActive       bool      `gorm:"default:true" json:"is_active"`
+	CreatedAt      time.Time `json:"created_at"`
 }
