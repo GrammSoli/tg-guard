@@ -83,34 +83,13 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 			})
 		}
 
-		// Upsert user into DB — use Unscoped to find soft-deleted users too,
-		// preventing unique constraint violations on re-auth.
-		user := model.User{TelegramID: tgUser.ID}
-		result := db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user)
-		if result.Error != nil {
-			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-				user = model.User{
-					TelegramID: tgUser.ID,
-					FirstName:  tgUser.FirstName,
-					LastName:   tgUser.LastName,
-					Username:   tgUser.Username,
-					PhotoURL:   tgUser.PhotoURL,
-					Locale:     localeFromCode(tgUser.LanguageCode),
-				}
-				if err := db.Create(&user).Error; err != nil {
-					log.Printf("[auth] failed to create user tg=%d: %v", tgUser.ID, err)
-					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-						"error": "failed to create user",
-					})
-				}
-			} else {
-				log.Printf("[auth] db error looking up tg=%d: %v", tgUser.ID, result.Error)
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-					"error": "database error",
-				})
-			}
-		} else {
-			// User found (possibly soft-deleted). Restore if needed.
+		// Upsert user — Unscoped() to see soft-deleted rows too.
+		var user model.User
+		err = db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user).Error
+
+		switch {
+		case err == nil:
+			// User found (active or soft-deleted). Restore + update profile.
 			profileUpdates := map[string]interface{}{}
 			if tgUser.FirstName != "" {
 				profileUpdates["first_name"] = tgUser.FirstName
@@ -124,15 +103,49 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 			if tgUser.PhotoURL != "" {
 				profileUpdates["photo_url"] = tgUser.PhotoURL
 			}
-			// Restore soft-deleted user — gorm.Expr("NULL") is required
-			// because GORM's Updates() silently skips Go nil values.
 			if user.DeletedAt.Valid {
 				profileUpdates["deleted_at"] = gorm.Expr("NULL")
-				user.DeletedAt.Valid = false // clear in-memory flag
+				user.DeletedAt.Valid = false
 			}
 			if len(profileUpdates) > 0 {
 				db.Unscoped().Model(&user).Updates(profileUpdates)
 			}
+
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			// User genuinely doesn't exist → create.
+			user = model.User{
+				TelegramID: tgUser.ID,
+				FirstName:  tgUser.FirstName,
+				LastName:   tgUser.LastName,
+				Username:   tgUser.Username,
+				PhotoURL:   tgUser.PhotoURL,
+				Locale:     localeFromCode(tgUser.LanguageCode),
+			}
+			if createErr := db.Create(&user).Error; createErr != nil {
+				// Fallback: unique constraint race — another request
+				// created the row (or a soft-deleted row exists but the
+				// Unscoped query above failed for a transient reason).
+				// Try one more time with Unscoped.
+				log.Printf("[auth] create failed tg=%d (%v), attempting unscoped fallback", tgUser.ID, createErr)
+				if fallbackErr := db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user).Error; fallbackErr != nil {
+					log.Printf("[auth] fallback also failed tg=%d: %v", tgUser.ID, fallbackErr)
+					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+						"error": "failed to create user",
+					})
+				}
+				// Restore if soft-deleted
+				if user.DeletedAt.Valid {
+					db.Unscoped().Model(&user).Update("deleted_at", gorm.Expr("NULL"))
+					user.DeletedAt.Valid = false
+				}
+			}
+
+		default:
+			// Unexpected DB error (connection, missing column, etc.)
+			log.Printf("[auth] db error looking up tg=%d: %v", tgUser.ID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "database error",
+			})
 		}
 
 		c.Locals(contextKeyUser, &user)
