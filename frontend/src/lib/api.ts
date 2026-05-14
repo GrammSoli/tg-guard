@@ -42,8 +42,21 @@ export class ApiError extends Error {
 let sessionExpiredHandled = false;
 
 // Global flag set when the server returns 403 account_banned.
-let bannedFlag = false;
-export function isBanned(): boolean { return bannedFlag; }
+// Uses Zustand so React components reactively re-render.
+import { create } from "zustand";
+
+interface BanStore {
+  banned: boolean;
+  setBanned: (v: boolean) => void;
+}
+
+export const useBanStore = create<BanStore>((set) => ({
+  banned: false,
+  setBanned: (v) => set({ banned: v }),
+}));
+
+/** @deprecated Use useBanStore().banned instead for reactive checks */
+export function isBanned(): boolean { return useBanStore.getState().banned; }
 
 function handleSessionExpired() {
   if (sessionExpiredHandled) return;
@@ -80,7 +93,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   if (res.status === 403) {
     const body = await res.text().catch(() => "");
     if (body.includes("account_banned")) {
-      bannedFlag = true;
+      useBanStore.getState().setBanned(true);
       throw new ApiError(403, "account_banned");
     }
     throw new ApiError(403, body || "Forbidden");

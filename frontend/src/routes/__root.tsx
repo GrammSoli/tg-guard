@@ -9,7 +9,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { GlobalModals } from "@/components/subguard/GlobalModals";
 import { BannedScreen } from "@/components/subguard/BannedScreen";
-import { isBanned } from "@/lib/api";
+import { useBanStore } from "@/lib/api";
 
 function NotFoundComponent() {
   return (
@@ -78,10 +78,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const banned = useBanStore((s) => s.banned);
+
+  if (banned) {
+    return <BannedScreen />;
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
-      {isBanned() && <BannedScreen />}
       <Outlet />
       <GlobalModals />
       <Toaster />
