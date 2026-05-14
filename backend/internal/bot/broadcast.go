@@ -186,10 +186,14 @@ func (bh *broadcastHandler) runBroadcast(b *tgbot.Bot, lang string, fromChatID i
 
 	var sent, failed int
 
-	// Build the base query with language + active-user filters.
+	// Build the base query with language + active-user filters. Inactive
+	// users (those who blocked the bot — is_active=false set by the
+	// my_chat_member handler) are excluded: Telegram would reject every
+	// send with "bot was blocked by the user" anyway, and we don't want
+	// to burn API quota or fan up the 429 rate-limit counter for them.
 	q := bh.panel.db.WithContext(ctx).
 		Model(&model.User{}).
-		Where("is_banned = false AND deleted_at IS NULL")
+		Where("is_banned = false AND deleted_at IS NULL AND is_active = true")
 
 	switch lang {
 	case "ru":

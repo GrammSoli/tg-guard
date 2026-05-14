@@ -74,18 +74,21 @@ func (r *AdminRepo) GetStats() (*StatsResult, error) {
 			COUNT(*) FILTER (WHERE u.created_at >= $2 AND u.created_at < $1)  AS users_yesterday,
 			COUNT(*) FILTER (WHERE u.created_at >= $3)                        AS users_week,
 
-			-- Locale breakdown
-			COUNT(*) FILTER (WHERE LOWER(u.locale) = 'ru')                    AS locale_ru,
-			COUNT(*) FILTER (WHERE LOWER(u.locale) = 'en')                    AS locale_en,
-			COUNT(*) FILTER (WHERE LOWER(u.locale) NOT IN ('ru','en'))        AS locale_other,
+			-- Locale breakdown — live users only. Blocked accounts skew the
+			-- % split and aren't real audience anymore.
+			COUNT(*) FILTER (WHERE LOWER(u.locale) = 'ru'              AND u.is_active = true) AS locale_ru,
+			COUNT(*) FILTER (WHERE LOWER(u.locale) = 'en'              AND u.is_active = true) AS locale_en,
+			COUNT(*) FILTER (WHERE LOWER(u.locale) NOT IN ('ru','en')  AND u.is_active = true) AS locale_other,
 
 			-- Monetization
 			COUNT(*) FILTER (WHERE u.is_donator)                              AS donators,
 			COUNT(*) FILTER (WHERE u.is_donator AND u.updated_at >= $1)       AS donors_today,
 
-			-- Activity
-			COUNT(*) FILTER (WHERE u.updated_at >= NOW() - INTERVAL '1 day')  AS dau,
-			COUNT(*) FILTER (WHERE u.updated_at >= NOW() - INTERVAL '30 days') AS mau
+			-- Activity. Inactive users must be excluded — blocking the bot
+			-- fires my_chat_member which bumps users.updated_at, so without
+			-- this filter every churn event would also re-inflate DAU.
+			COUNT(*) FILTER (WHERE u.updated_at >= NOW() - INTERVAL '1 day'  AND u.is_active = true) AS dau,
+			COUNT(*) FILTER (WHERE u.updated_at >= NOW() - INTERVAL '30 days' AND u.is_active = true) AS mau
 		FROM users u
 		WHERE u.deleted_at IS NULL
 	`, todayStart, yesterdayStart, weekStart).Scan(&stats).Error
@@ -324,12 +327,14 @@ func (r *AdminRepo) IncrementClick(id uint) error {
 // ── Broadcast ──────────────────────────────────────────
 
 // CountBroadcastRecipients returns the count of eligible users for a
-// broadcast filtered by language segment. Excludes banned and soft-deleted
-// users. When lang == "en", includes users whose locale is empty or NULL
+// broadcast filtered by language segment. Excludes banned, soft-deleted,
+// and inactive (bot-blocked) users — there's no point counting accounts
+// the Telegram API will hard-fail with "bot was blocked by the user".
+// When lang == "en", includes users whose locale is empty or NULL
 // (fallback — undetected locale defaults to English audience).
 func (r *AdminRepo) CountBroadcastRecipients(lang string) (int64, error) {
 	var count int64
-	q := r.db.Model(&model.User{}).Where("is_banned = false AND deleted_at IS NULL")
+	q := r.db.Model(&model.User{}).Where("is_banned = false AND deleted_at IS NULL AND is_active = true")
 	switch lang {
 	case "ru":
 		q = q.Where("LOWER(locale) = 'ru'")
