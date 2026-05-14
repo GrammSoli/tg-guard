@@ -195,8 +195,14 @@ func handleMyChatMember(ctx context.Context, update *models.Update, db *gorm.DB)
 		return
 	}
 
+	// Dirty-check the value at the SQL level so a no-op transition
+	// (user already kicked, status=kicked re-fired — Telegram does this
+	// occasionally on webhook retry) doesn't bump users.updated_at and
+	// keep churning WAL. Audit O1. RowsAffected==0 now means "no state
+	// change required"; we still log so the operator can see the event
+	// arrived.
 	res := db.WithContext(ctx).Model(&model.User{}).
-		Where("telegram_id = ?", tgID).
+		Where("telegram_id = ? AND is_active != ?", tgID, isActive).
 		Update("is_active", isActive)
 	if res.Error != nil {
 		log.Printf("[bot/my_chat_member] DB update tg=%d active=%v: %v", tgID, isActive, res.Error)
@@ -371,8 +377,13 @@ func handleRenewCallback(ctx context.Context, b *tgbot.Bot, update *models.Updat
 		return
 	}
 
+	// Single JOINed read — was two sequential SELECTs (sub then owner).
+	// Audit A7. Preload follows the Subscription.User belongs-to relation
+	// already declared on the model. Owner is dereferenced below; nil
+	// guard catches the (impossible-in-practice but defensive) case
+	// where the sub exists but its user has been hard-deleted.
 	var sub model.Subscription
-	if err := db.WithContext(ctx).First(&sub, "id = ?", subID).Error; err != nil {
+	if err := db.WithContext(ctx).Preload("User").First(&sub, "id = ?", subID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			answerAndLog("subscription not found")
 		} else {
@@ -381,11 +392,9 @@ func handleRenewCallback(ctx context.Context, b *tgbot.Bot, update *models.Updat
 		}
 		return
 	}
-
-	// Authorize the click — only the owner can advance the date.
-	var owner model.User
-	if err := db.WithContext(ctx).First(&owner, sub.UserID).Error; err != nil {
-		log.Printf("[bot.renew] owner lookup error: %v", err)
+	owner := &sub.User
+	if owner == nil || owner.ID == 0 {
+		log.Printf("[bot.renew] orphan sub %s — owner missing", sub.ID)
 		answerAndLog("forbidden")
 		return
 	}
@@ -476,8 +485,9 @@ func handleCancelCallback(ctx context.Context, b *tgbot.Bot, update *models.Upda
 		return
 	}
 
+	// Single JOINed read — see renew callback above (audit A7).
 	var sub model.Subscription
-	if err := db.WithContext(ctx).First(&sub, "id = ?", subID).Error; err != nil {
+	if err := db.WithContext(ctx).Preload("User").First(&sub, "id = ?", subID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			answerAndLog("already deleted")
 		} else {
@@ -486,10 +496,9 @@ func handleCancelCallback(ctx context.Context, b *tgbot.Bot, update *models.Upda
 		}
 		return
 	}
-
-	var owner model.User
-	if err := db.WithContext(ctx).First(&owner, sub.UserID).Error; err != nil {
-		log.Printf("[bot.cancel] owner lookup error: %v", err)
+	owner := &sub.User
+	if owner == nil || owner.ID == 0 {
+		log.Printf("[bot.cancel] orphan sub %s — owner missing", sub.ID)
 		answerAndLog("forbidden")
 		return
 	}

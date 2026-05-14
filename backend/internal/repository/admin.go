@@ -96,10 +96,25 @@ func (r *AdminRepo) GetStats() (*StatsResult, error) {
 		return nil, fmt.Errorf("user stats: %w", err)
 	}
 
-	// Content stats (subscriptions + rooms) — separate lightweight queries
-	r.db.Raw(`SELECT COUNT(*) FROM subscriptions`).Scan(&stats.TotalSubscriptions)
-	r.db.Raw(`SELECT COUNT(*) FROM subscriptions WHERE created_at >= $1`, todayStart).Scan(&stats.SubsToday)
-	r.db.Raw(`SELECT COUNT(*) FROM shared_rooms`).Scan(&stats.TotalRooms)
+	// Content stats — collapsed from three Raw round-trips into a single
+	// query with scalar subselects. PostgreSQL plans these in parallel
+	// when they touch different tables, so on top of the RTT saving we
+	// also get cheaper execution. Audit O3.
+	type contentStats struct {
+		TotalSubscriptions int64
+		SubsToday          int64
+		TotalRooms         int64
+	}
+	var content contentStats
+	r.db.Raw(`
+		SELECT
+			(SELECT COUNT(*) FROM subscriptions)                       AS total_subscriptions,
+			(SELECT COUNT(*) FROM subscriptions WHERE created_at >= $1) AS subs_today,
+			(SELECT COUNT(*) FROM shared_rooms)                        AS total_rooms
+	`, todayStart).Scan(&content)
+	stats.TotalSubscriptions = content.TotalSubscriptions
+	stats.SubsToday = content.SubsToday
+	stats.TotalRooms = content.TotalRooms
 
 	// Today's signups by traffic source (top 5)
 	if stats.UsersToday > 0 {
@@ -197,25 +212,10 @@ func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 
 // ── User Management ────────────────────────────────────
 
-// GetExportUsers returns every non-deleted user row for the CSV export.
-//
-// Filter is deliberately wide: only `deleted_at IS NULL` excludes truly
-// gone users. Banned (is_banned=true) and inactive (is_active=false, i.e.
-// blocked the bot) users are KEPT because the admin uses this dump for
-// ad-network retargeting — those segments are exactly who you want to
-// re-engage off-platform. Audience metrics in /admin Stats already have
-// their own narrower filters for "live audience" math; this method is
-// strictly for raw export.
-//
-// Ordered by created_at DESC so the most recent signups land at the top
-// of the spreadsheet.
-func (r *AdminRepo) GetExportUsers() ([]model.User, error) {
-	var users []model.User
-	err := r.db.Where("deleted_at IS NULL").
-		Order("created_at DESC").
-		Find(&users).Error
-	return users, err
-}
+// NOTE: A previous `GetExportUsers()` helper materialised the entire
+// users table into a single slice. It's been removed — the CSV export
+// streams rows via FindInBatches directly from bot/admin_panel.go to
+// keep peak memory bounded. See audit C4.
 
 func (r *AdminRepo) FindUserByTelegramID(tgID int64) (*model.User, error) {
 	var u model.User

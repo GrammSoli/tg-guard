@@ -115,8 +115,14 @@ type RoomService struct {
 //   - HasPaid + RoomID composite covers the billing-reset worker query
 //     `WHERE room_id = ? AND has_paid = false`.
 type RoomMember struct {
-	RoomID   uuid.UUID  `gorm:"type:uuid;primaryKey;index:idx_rm_room_paid,priority:1" json:"-"`
-	UserID   uint       `gorm:"primaryKey;index" json:"user_id"`
+	RoomID uuid.UUID `gorm:"type:uuid;primaryKey;index:idx_rm_room_paid,priority:1" json:"-"`
+	UserID uint      `gorm:"primaryKey;index" json:"user_id"`
+	// User is a `belongs to` relation populated by Preload("Members.User")
+	// in RoomRepo.GetByID. Lets handler/room.go skip the second
+	// GetUsersByIDs roundtrip — see audit A3. JSON-omitted because the
+	// flattened Name/Username/Avatar fields below already encode what
+	// the API consumer needs (and we don't want to leak the full User).
+	User     *User      `gorm:"foreignKey:UserID;references:ID;constraint:OnDelete:CASCADE" json:"-"`
 	Name     string     `gorm:"size:100" json:"name"`
 	Username string     `gorm:"size:64" json:"username,omitempty"`
 	Avatar   string     `gorm:"size:512" json:"avatar,omitempty"`

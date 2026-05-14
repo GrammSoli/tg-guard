@@ -19,6 +19,7 @@ import (
 	"github.com/subguard/backend/internal/config"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/repository"
+	"github.com/subguard/backend/internal/workerutil"
 )
 
 // ── FSM state constants ────────────────────────────────
@@ -79,12 +80,17 @@ func newAdminPanel(cfg *config.Config, db *gorm.DB, rdb *redis.Client, appCtx co
 // ── FSM helpers ────────────────────────────────────────
 
 func (p *adminPanel) setState(ctx context.Context, tgID int64, state string) {
-	key := fsmKeyPrefix + strconv.FormatInt(tgID, 10)
+	idStr := strconv.FormatInt(tgID, 10)
+	key := fsmKeyPrefix + idStr
 	if state == stateNone {
 		p.rdb.Del(ctx, key)
 		return
 	}
 	p.rdb.Set(ctx, key, state, fsmTTL)
+	// Mirror the TTL onto the data key so a multi-step flow that only
+	// writes data between state transitions doesn't let the state expire
+	// underneath it.
+	p.rdb.Expire(ctx, fsmDataPrefix+idStr, fsmTTL)
 }
 
 func (p *adminPanel) getState(ctx context.Context, tgID int64) string {
@@ -96,9 +102,14 @@ func (p *adminPanel) getState(ctx context.Context, tgID int64) string {
 	return val
 }
 
+// setData stores partial-flow data AND refreshes the state-key TTL. Long
+// multi-step admin flows (broadcast composition, offer creation) used to
+// expire mid-flow if the user paused near the 1h boundary because each
+// setData call only touched the data key — see audit A1.
 func (p *adminPanel) setData(ctx context.Context, tgID int64, data string) {
-	key := fsmDataPrefix + strconv.FormatInt(tgID, 10)
-	p.rdb.Set(ctx, key, data, fsmTTL)
+	idStr := strconv.FormatInt(tgID, 10)
+	p.rdb.Set(ctx, fsmDataPrefix+idStr, data, fsmTTL)
+	p.rdb.Expire(ctx, fsmKeyPrefix+idStr, fsmTTL)
 }
 
 func (p *adminPanel) getData(ctx context.Context, tgID int64) string {
@@ -506,32 +517,122 @@ func (p *adminPanel) handleStats(ctx context.Context, b *tgbot.Bot, chatID int64
 
 // ── CSV Export ──────────────────────────────────────────
 
-// handleExportCSV dumps the user table to a Telegram document. Progress
-// feedback is provided by the toast text on AnswerCallbackQuery from the
-// router ("⏳ Формирую файл...") — we deliberately do NOT replace the
-// stats message text so the admin can return to the dashboard after the
-// download lands.
+// exportBatchSize controls how many user rows are read + flushed to the
+// CSV writer per FindInBatches iteration. 1000 keeps peak memory bounded
+// (a row ≈ 400 bytes → batch ≈ 400 KB) while amortising per-batch
+// overhead. Bump if export latency matters more than memory headroom.
+const exportBatchSize = 1000
+
+// handleExportCSV dispatches the heavy export to a background goroutine
+// and returns immediately. The Telegram callback was already acked with
+// a "⏳ Формирую файл..." toast by the router, so the admin sees feedback
+// without us blocking the callback handler past Telegram's 30s ack
+// deadline (audit C4).
 //
-// The filter is intentionally wide: everyone except soft-deleted users
-// (incl. banned + churned). See repository.GetExportUsers for why.
-func (p *adminPanel) handleExportCSV(ctx context.Context, b *tgbot.Bot, chatID int64, _ int) {
-	users, err := p.repo.GetExportUsers()
-	if err != nil {
-		log.Printf("[admin] export csv query error: %v", err)
-		b.SendMessage(ctx, &tgbot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "❌ Ошибка при выгрузке данных.",
+// The goroutine is registered on workerWG so graceful shutdown waits for
+// in-flight exports to finish (or hit the drain timeout) before closing
+// the DB pool.
+func (p *adminPanel) handleExportCSV(_ context.Context, b *tgbot.Bot, chatID int64, _ int) {
+	if p.wg != nil {
+		p.wg.Add(1)
+	}
+	go func() {
+		if p.wg != nil {
+			defer p.wg.Done()
+		}
+		workerutil.Supervise("admin-export-csv", func() {
+			p.runExportCSV(b, chatID)
 		})
+	}()
+}
+
+// runExportCSV streams the user table to a CSV via FindInBatches so peak
+// memory stays bounded regardless of total user count. The CSV bytes
+// accumulate in a single bytes.Buffer (we have to materialise the full
+// document anyway — Telegram's SendDocument needs an io.Reader of the
+// complete file), but each batch writes 1000 rows to the csv.Writer and
+// flushes, so we never hold the decoded User structs and the CSV rows
+// simultaneously.
+//
+// Filter is intentionally wide: everyone except soft-deleted users
+// (incl. banned + churned). The admin uses this dump for ad-network
+// retargeting where bot-blocked accounts are exactly the segment to
+// re-engage off-platform.
+func (p *adminPanel) runExportCSV(b *tgbot.Bot, chatID int64) {
+	ctx, cancel := context.WithTimeout(p.appCtx, 10*time.Minute)
+	defer cancel()
+
+	var buf bytes.Buffer
+	// UTF-8 BOM so Excel on Windows auto-detects the encoding. Linux
+	// readers ignore the leading 0xEF 0xBB 0xBF.
+	buf.Write([]byte{0xEF, 0xBB, 0xBF})
+
+	w := csv.NewWriter(&buf)
+	header := []string{
+		"Telegram ID", "Username", "First Name", "Last Name",
+		"Locale", "Premium", "Active", "Traffic Source", "Registration Date",
+	}
+	if err := w.Write(header); err != nil {
+		log.Printf("[admin] export csv header error: %v", err)
+		p.notifyExportError(ctx, b, chatID)
 		return
 	}
 
-	buf, err := buildUsersCSV(users)
+	var total int
+	err := p.db.WithContext(ctx).
+		Model(&model.User{}).
+		Where("deleted_at IS NULL").
+		Order("created_at DESC").
+		FindInBatches(&[]model.User{}, exportBatchSize, func(tx *gorm.DB, _ int) error {
+			users, ok := tx.Statement.Dest.(*[]model.User)
+			if !ok {
+				return fmt.Errorf("export: unexpected batch dest type")
+			}
+			for i := range *users {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+				u := &(*users)[i]
+				premium := "no"
+				if u.IsDonator {
+					premium = "yes"
+				}
+				active := "no"
+				if u.IsActive {
+					active = "yes"
+				}
+				if err := w.Write([]string{
+					strconv.FormatInt(u.TelegramID, 10),
+					u.Username,
+					u.FirstName,
+					u.LastName,
+					u.Locale,
+					premium,
+					active,
+					u.TrafficSourceID,
+					u.CreatedAt.UTC().Format("2006-01-02 15:04:05"),
+				}); err != nil {
+					return err
+				}
+				total++
+			}
+			// Flush per batch so the writer's internal buffer doesn't grow
+			// unboundedly across iterations.
+			w.Flush()
+			return w.Error()
+		}).Error
+
 	if err != nil {
-		log.Printf("[admin] export csv build error: %v", err)
-		b.SendMessage(ctx, &tgbot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "❌ Ошибка при генерации файла.",
-		})
+		log.Printf("[admin] export csv iteration error: %v", err)
+		p.notifyExportError(ctx, b, chatID)
+		return
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		log.Printf("[admin] export csv final flush error: %v", err)
+		p.notifyExportError(ctx, b, chatID)
 		return
 	}
 
@@ -542,67 +643,19 @@ func (p *adminPanel) handleExportCSV(ctx context.Context, b *tgbot.Bot, chatID i
 			Filename: filename,
 			Data:     bytes.NewReader(buf.Bytes()),
 		},
-		Caption:   fmt.Sprintf("✅ Экспорт завершён. В файле записей: *%d*", len(users)),
+		Caption:   fmt.Sprintf("✅ Экспорт завершён. В файле записей: *%d*", total),
 		ParseMode: "Markdown",
 	}); sendErr != nil {
 		log.Printf("[admin] export csv send error: %v", sendErr)
-		b.SendMessage(ctx, &tgbot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "❌ Ошибка при отправке файла.",
-		})
+		p.notifyExportError(ctx, b, chatID)
 	}
 }
 
-// buildUsersCSV renders the user roster to a UTF-8 CSV with a leading
-// BOM (so Excel auto-detects encoding) and human-readable headers
-// matching the export spec.
-//
-// All values are stringified explicitly: booleans → "yes"/"no",
-// timestamps → "YYYY-MM-DD HH:MM:SS UTC" so a downstream pivot table
-// doesn't choke on locale-specific date parsing.
-func buildUsersCSV(users []model.User) (*bytes.Buffer, error) {
-	var buf bytes.Buffer
-	// UTF-8 BOM for Excel auto-detect on Windows. Linux readers ignore it.
-	buf.Write([]byte{0xEF, 0xBB, 0xBF})
-
-	w := csv.NewWriter(&buf)
-	header := []string{
-		"Telegram ID", "Username", "First Name", "Last Name",
-		"Locale", "Premium", "Active", "Traffic Source", "Registration Date",
-	}
-	if err := w.Write(header); err != nil {
-		return nil, err
-	}
-
-	for _, u := range users {
-		premium := "no"
-		if u.IsDonator {
-			premium = "yes"
-		}
-		active := "no"
-		if u.IsActive {
-			active = "yes"
-		}
-		row := []string{
-			strconv.FormatInt(u.TelegramID, 10),
-			u.Username,
-			u.FirstName,
-			u.LastName,
-			u.Locale,
-			premium,
-			active,
-			u.TrafficSourceID,
-			u.CreatedAt.UTC().Format("2006-01-02 15:04:05"),
-		}
-		if err := w.Write(row); err != nil {
-			return nil, err
-		}
-	}
-	w.Flush()
-	if err := w.Error(); err != nil {
-		return nil, err
-	}
-	return &buf, nil
+func (p *adminPanel) notifyExportError(ctx context.Context, b *tgbot.Bot, chatID int64) {
+	b.SendMessage(ctx, &tgbot.SendMessageParams{
+		ChatID: chatID,
+		Text:   "❌ Ошибка при выгрузке. Попробуйте позже.",
+	})
 }
 
 // ── Users Module ───────────────────────────────────────
