@@ -15,7 +15,7 @@ function getInitData(): string {
   }
 }
 
-interface ApiOptions extends Omit<RequestInit, "body"> {
+interface ApiOptions extends Omit<RequestInit, "body" | "signal"> {
   body?: unknown;
   /**
    * Optional zod schema for runtime validation of the JSON response. When set,
@@ -23,6 +23,15 @@ interface ApiOptions extends Omit<RequestInit, "body"> {
    * easier to diagnose than a downstream undefined-access crash.
    */
   schema?: ZodType<unknown>;
+  /**
+   * AbortSignal for cancelling in-flight requests. Use when the caller (e.g.
+   * a Zustand store opened by a soon-to-unmount sheet) should drop the
+   * response if the user navigates away before it lands — audit O4. The api
+   * helper translates the DOMException("AbortError") into a sentinel
+   * ApiError(0, "aborted") so consumer try/catch branches can ignore it
+   * without a name-string check.
+   */
+  signal?: AbortSignal;
 }
 
 export class ApiError extends Error {
@@ -71,17 +80,28 @@ function handleSessionExpired() {
  * Automatically serializes body as JSON and attaches Telegram initData.
  */
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const { body, headers: extraHeaders, schema, ...rest } = options;
+  const { body, headers: extraHeaders, schema, signal, ...rest } = options;
 
-  const res = await fetch(`${BASE}${path}`, {
-    ...rest,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Telegram-Init-Data": getInitData(),
-      ...extraHeaders,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...rest,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Init-Data": getInitData(),
+        ...extraHeaders,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal,
+    });
+  } catch (err) {
+    // Translate aborts so callers can `instanceof ApiError` instead of
+    // sniffing for the platform-specific AbortError name.
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiError(0, "aborted");
+    }
+    throw err;
+  }
 
   if (res.status === 401) {
     // initData has expired (5-minute server window) or auth failed entirely.
