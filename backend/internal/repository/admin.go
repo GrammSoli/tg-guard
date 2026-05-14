@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -19,29 +20,96 @@ func NewAdminRepo(db *gorm.DB) *AdminRepo {
 
 // ── Stats ──────────────────────────────────────────────
 
+// TrafficSourceStat is one row of the "today's signups by source" breakdown.
+type TrafficSourceStat struct {
+	Source string `json:"source"`
+	Count  int64  `json:"count"`
+}
+
 type StatsResult struct {
-	TotalUsers          int64 `json:"total_users"`
-	DAU                 int64 `json:"dau"`
-	MAU                 int64 `json:"mau"`
-	Donators            int64 `json:"donators"`
-	TotalSubscriptions  int64 `json:"total_subscriptions"`
-	TotalRooms          int64 `json:"total_rooms"`
+	// Users cohorts
+	TotalUsers    int64 `json:"total_users"`
+	UsersToday    int64 `json:"users_today"`
+	UsersYesterday int64 `json:"users_yesterday"`
+	UsersWeek     int64 `json:"users_week"`
+
+	// Locale breakdown
+	LocaleRU    int64 `json:"locale_ru"`
+	LocaleEN    int64 `json:"locale_en"`
+	LocaleOther int64 `json:"locale_other"`
+
+	// Monetization
+	Donators      int64 `json:"donators"`
+	DonorsToday   int64 `json:"donors_today"`
+
+	// Content
+	TotalSubscriptions int64 `json:"total_subscriptions"`
+	SubsToday          int64 `json:"subs_today"`
+	TotalRooms         int64 `json:"total_rooms"`
+
+	// Activity (legacy, kept for API compat)
+	DAU int64 `json:"dau"`
+	MAU int64 `json:"mau"`
+
+	// Traffic attribution for today's signups (populated separately)
+	TodaySources []TrafficSourceStat `json:"today_sources,omitempty" gorm:"-"`
 }
 
 func (r *AdminRepo) GetStats() (*StatsResult, error) {
+	now := time.Now().UTC()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	yesterdayStart := todayStart.AddDate(0, 0, -1)
+	weekStart := todayStart.AddDate(0, 0, -7)
+
 	var stats StatsResult
 	err := r.db.Raw(`
 		SELECT
-			(SELECT count(*) FROM users) AS total_users,
-			(SELECT count(*) FROM users WHERE updated_at >= now() - interval '1 day') AS dau,
-			(SELECT count(*) FROM users WHERE updated_at >= now() - interval '30 days') AS mau,
-			(SELECT count(*) FROM users WHERE is_donator) AS donators,
-			(SELECT count(*) FROM subscriptions) AS total_subscriptions,
-			(SELECT count(*) FROM shared_rooms) AS total_rooms
-	`).Scan(&stats).Error
+			-- User cohorts (only non-deleted, non-banned)
+			COUNT(*)                                                          AS total_users,
+			COUNT(*) FILTER (WHERE u.created_at >= $1)                        AS users_today,
+			COUNT(*) FILTER (WHERE u.created_at >= $2 AND u.created_at < $1)  AS users_yesterday,
+			COUNT(*) FILTER (WHERE u.created_at >= $3)                        AS users_week,
+
+			-- Locale breakdown
+			COUNT(*) FILTER (WHERE LOWER(u.locale) = 'ru')                    AS locale_ru,
+			COUNT(*) FILTER (WHERE LOWER(u.locale) = 'en')                    AS locale_en,
+			COUNT(*) FILTER (WHERE LOWER(u.locale) NOT IN ('ru','en'))        AS locale_other,
+
+			-- Monetization
+			COUNT(*) FILTER (WHERE u.is_donator)                              AS donators,
+			COUNT(*) FILTER (WHERE u.is_donator AND u.updated_at >= $1)       AS donors_today,
+
+			-- Activity
+			COUNT(*) FILTER (WHERE u.updated_at >= NOW() - INTERVAL '1 day')  AS dau,
+			COUNT(*) FILTER (WHERE u.updated_at >= NOW() - INTERVAL '30 days') AS mau
+		FROM users u
+		WHERE u.deleted_at IS NULL
+	`, todayStart, yesterdayStart, weekStart).Scan(&stats).Error
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("user stats: %w", err)
 	}
+
+	// Content stats (subscriptions + rooms) — separate lightweight queries
+	r.db.Raw(`SELECT COUNT(*) FROM subscriptions`).Scan(&stats.TotalSubscriptions)
+	r.db.Raw(`SELECT COUNT(*) FROM subscriptions WHERE created_at >= $1`, todayStart).Scan(&stats.SubsToday)
+	r.db.Raw(`SELECT COUNT(*) FROM shared_rooms`).Scan(&stats.TotalRooms)
+
+	// Today's signups by traffic source (top 5)
+	if stats.UsersToday > 0 {
+		var sources []TrafficSourceStat
+		r.db.Raw(`
+			SELECT
+				COALESCE(NULLIF(traffic_source_id, ''), 'organic') AS source,
+				COUNT(*) AS count
+			FROM users
+			WHERE created_at >= $1 AND deleted_at IS NULL
+			GROUP BY source
+			ORDER BY count DESC
+			LIMIT 5
+		`, todayStart).Scan(&sources)
+		stats.TodaySources = sources
+	}
+
 	return &stats, nil
 }
 

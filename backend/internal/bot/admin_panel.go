@@ -355,21 +355,64 @@ func (p *adminPanel) handleStats(ctx context.Context, b *tgbot.Bot, chatID int64
 		return
 	}
 
-	text := fmt.Sprintf(`📊 *Статистика SubGuard*
+	// Locale percentages
+	ruPct, enPct, otherPct := 0, 0, 0
+	if stats.TotalUsers > 0 {
+		ruPct = int(stats.LocaleRU * 100 / stats.TotalUsers)
+		enPct = int(stats.LocaleEN * 100 / stats.TotalUsers)
+		otherPct = 100 - ruPct - enPct
+	}
 
-👥 Пользователей: %d
-📱 DAU: %d | MAU: %d
-💎 Премиум: %d
-📋 Подписок: %d
-🏠 Комнат: %d`,
-		stats.TotalUsers, stats.DAU, stats.MAU,
-		stats.Donators, stats.TotalSubscriptions, stats.TotalRooms)
+	var sb strings.Builder
+	sb.WriteString("📊 *Аналитика SubGuard*\n\n")
+
+	// ── Audience ──
+	sb.WriteString("👥 *Аудитория*\n")
+	sb.WriteString(fmt.Sprintf("• Всего: *%d*\n", stats.TotalUsers))
+	sb.WriteString(fmt.Sprintf("• Сегодня: *+%d*\n", stats.UsersToday))
+
+	// Traffic source attribution for today
+	if stats.UsersToday > 0 && len(stats.TodaySources) > 0 {
+		for _, src := range stats.TodaySources {
+			icon := "🔗"
+			name := "`" + src.Source + "`"
+			if src.Source == "organic" {
+				icon = "🌿"
+				name = "Органика"
+			}
+			sb.WriteString(fmt.Sprintf("   ↳ %s %s: %d\n", icon, name, src.Count))
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("• Вчера: *+%d*\n", stats.UsersYesterday))
+	sb.WriteString(fmt.Sprintf("• За 7 дней: *+%d*\n", stats.UsersWeek))
+	sb.WriteString(fmt.Sprintf("• DAU: %d | MAU: %d\n\n", stats.DAU, stats.MAU))
+
+	// ── Demographics ──
+	sb.WriteString("🌍 *Демография*\n")
+	sb.WriteString(fmt.Sprintf("• 🇷🇺 RU: %d (%d%%)\n", stats.LocaleRU, ruPct))
+	sb.WriteString(fmt.Sprintf("• 🇬🇧 EN: %d (%d%%)\n", stats.LocaleEN, enPct))
+	if stats.LocaleOther > 0 {
+		sb.WriteString(fmt.Sprintf("• 🌐 Other: %d (%d%%)\n", stats.LocaleOther, otherPct))
+	}
+	sb.WriteString("\n")
+
+	// ── Monetization ──
+	sb.WriteString("💎 *Монетизация*\n")
+	sb.WriteString(fmt.Sprintf("• Всего Premium: *%d*\n", stats.Donators))
+	sb.WriteString(fmt.Sprintf("• Premium сегодня: *+%d*\n\n", stats.DonorsToday))
+
+	// ── Content ──
+	sb.WriteString("📋 *Активность*\n")
+	sb.WriteString(fmt.Sprintf("• Всего подписок: %d\n", stats.TotalSubscriptions))
+	sb.WriteString(fmt.Sprintf("• Добавлено сегодня: +%d\n", stats.SubsToday))
+	sb.WriteString(fmt.Sprintf("• Активных комнат: %d", stats.TotalRooms))
 
 	kb := backButton()
 	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
 		ChatID:      chatID,
 		MessageID:   msgID,
-		Text:        text,
+		Text:        sb.String(),
 		ParseMode:   "Markdown",
 		ReplyMarkup: &kb,
 	})
