@@ -81,9 +81,10 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 			})
 		}
 
-		// Upsert user into DB
+		// Upsert user into DB — use Unscoped to find soft-deleted users too,
+		// preventing unique constraint violations on re-auth.
 		user := model.User{TelegramID: tgUser.ID}
-		result := db.Where("telegram_id = ?", tgUser.ID).First(&user)
+		result := db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user)
 		if result.Error != nil {
 			if result.Error == gorm.ErrRecordNotFound {
 				user = model.User{
@@ -122,8 +123,12 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 			if tgUser.PhotoURL != "" {
 				profileUpdates["photo_url"] = tgUser.PhotoURL
 			}
+			// Restore soft-deleted user on re-auth
+			if user.DeletedAt.Valid {
+				profileUpdates["deleted_at"] = nil
+			}
 			if len(profileUpdates) > 0 {
-				db.Model(&user).Updates(profileUpdates)
+				db.Unscoped().Model(&user).Updates(profileUpdates)
 			}
 		}
 

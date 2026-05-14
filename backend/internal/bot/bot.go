@@ -103,10 +103,10 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 	chatID := update.Message.Chat.ID
 	tgUser := update.Message.From
 
-	// Upsert user
+	// Upsert user — Unscoped to find soft-deleted users too.
 	var user model.User
 	isNewUser := false
-	result := db.Where("telegram_id = ?", tgUser.ID).First(&user)
+	result := db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user)
 	if result.Error == gorm.ErrRecordNotFound {
 		isNewUser = true
 		user = model.User{
@@ -116,6 +116,9 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 			Username:   tgUser.Username,
 		}
 		db.Create(&user)
+	} else if user.DeletedAt.Valid {
+		// Restore soft-deleted user on /start
+		db.Unscoped().Model(&user).Update("deleted_at", nil)
 	}
 
 	// Silently ignore banned users
