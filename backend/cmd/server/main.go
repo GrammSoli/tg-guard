@@ -75,6 +75,16 @@ func main() {
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(15 * time.Minute)
 
+	// Always ensure recently-added columns exist. This is safe to run
+	// repeatedly thanks to IF NOT EXISTS. Required because RUN_MIGRATIONS
+	// is off in production and AutoMigrate won't run.
+	if sqlDB, err := db.DB(); err == nil {
+		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`)
+		_, _ = sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users (deleted_at)`)
+		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT false`)
+		log.Println("ensured deleted_at + is_banned columns exist")
+	}
+
 	// Auto-migrate only in test/dev. Production should run a dedicated
 	// migration tool (golang-migrate, atlas) out-of-band so rolling deploys
 	// don't race on ALTER TABLE.
