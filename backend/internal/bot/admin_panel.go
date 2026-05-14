@@ -215,10 +215,10 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	case data == "admin_broadcast":
 		p.broadcast.handleBroadcastStart(ctx, b, chatID, msgID)
 
-	case strings.HasPrefix(data, "broadcast_lang_"):
+	case strings.HasPrefix(data, "admin_bc_lang_"):
 		p.broadcast.handleBroadcastLang(ctx, b, cb.From.ID, data, chatID, msgID)
 
-	case data == "broadcast_confirm":
+	case data == "admin_bc_confirm":
 		p.broadcast.handleBroadcastConfirm(ctx, b, cb.From.ID, chatID, msgID)
 
 	case data == "admin_recs_toggle":

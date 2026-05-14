@@ -35,11 +35,11 @@ func (bh *broadcastHandler) handleBroadcastStart(ctx context.Context, b *tgbot.B
 	kb := models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{
 			{
-				{Text: "🇷🇺 Только RU", CallbackData: "broadcast_lang_ru"},
-				{Text: "🇬🇧 Только EN", CallbackData: "broadcast_lang_en"},
+				{Text: "🇷🇺 Только RU", CallbackData: "admin_bc_lang_ru"},
+				{Text: "🇬🇧 Только EN", CallbackData: "admin_bc_lang_en"},
 			},
 			{
-				{Text: "🌍 Все", CallbackData: "broadcast_lang_all"},
+				{Text: "🌍 Все", CallbackData: "admin_bc_lang_all"},
 				{Text: "❌ Отмена", CallbackData: "admin_back"},
 			},
 		},
@@ -57,8 +57,8 @@ func (bh *broadcastHandler) handleBroadcastStart(ctx context.Context, b *tgbot.B
 // handleBroadcastLang processes the language choice callback (FSM Step 1→2).
 // Saves the chosen language in FSM data and moves to stateAwaitBroadcastMsg.
 func (bh *broadcastHandler) handleBroadcastLang(ctx context.Context, b *tgbot.Bot, tgID int64, data string, chatID int64, msgID int) {
-	// data = "broadcast_lang_ru" / "broadcast_lang_en" / "broadcast_lang_all"
-	lang := strings.TrimPrefix(data, "broadcast_lang_")
+	// data = "admin_bc_lang_ru" / "admin_bc_lang_en" / "admin_bc_lang_all"
+	lang := strings.TrimPrefix(data, "admin_bc_lang_")
 	if lang != "ru" && lang != "en" && lang != "all" {
 		return
 	}
@@ -120,7 +120,7 @@ func (bh *broadcastHandler) handleBroadcastContent(ctx context.Context, b *tgbot
 		ReplyMarkup: &models.InlineKeyboardMarkup{
 			InlineKeyboard: [][]models.InlineKeyboardButton{
 				{
-					{Text: "✅ Начать", CallbackData: "broadcast_confirm"},
+					{Text: "✅ Начать", CallbackData: "admin_bc_confirm"},
 					{Text: "❌ Отмена", CallbackData: "admin_back"},
 				},
 			},
