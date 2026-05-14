@@ -186,8 +186,18 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 		return
 	}
 
-	// Always ack the callback to remove the loading spinner.
-	b.AnswerCallbackQuery(ctx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: cb.ID})
+	// Always ack the callback to remove the loading spinner. A small
+	// number of callbacks need a toast text instead of a silent ack —
+	// e.g. "⏳ Формирую файл..." so the admin sees feedback while the
+	// CSV is generated. Add new entries here when needed.
+	ackText := ""
+	if cb.Data == "admin_export_csv" {
+		ackText = "⏳ Формирую файл..."
+	}
+	b.AnswerCallbackQuery(ctx, &tgbot.AnswerCallbackQueryParams{
+		CallbackQueryID: cb.ID,
+		Text:            ackText,
+	})
 
 	chatID := cb.From.ID // DM, so chatID == user ID
 	msgID := 0
@@ -477,21 +487,18 @@ func (p *adminPanel) handleStats(ctx context.Context, b *tgbot.Bot, chatID int64
 
 // ── CSV Export ──────────────────────────────────────────
 
-func (p *adminPanel) handleExportCSV(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int) {
-	// Notify admin that generation is in progress.
-	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
-		ChatID:    chatID,
-		MessageID: msgID,
-		Text:      "⏳ Формирую файл...",
-	})
-
-	// Fetch all active users.
-	var users []model.User
-	err := p.db.Where("is_banned = false AND deleted_at IS NULL").
-		Order("created_at DESC").
-		Find(&users).Error
+// handleExportCSV dumps the user table to a Telegram document. Progress
+// feedback is provided by the toast text on AnswerCallbackQuery from the
+// router ("⏳ Формирую файл...") — we deliberately do NOT replace the
+// stats message text so the admin can return to the dashboard after the
+// download lands.
+//
+// The filter is intentionally wide: everyone except soft-deleted users
+// (incl. banned + churned). See repository.GetExportUsers for why.
+func (p *adminPanel) handleExportCSV(ctx context.Context, b *tgbot.Bot, chatID int64, _ int) {
+	users, err := p.repo.GetExportUsers()
 	if err != nil {
-		log.Printf("[admin] export csv error: %v", err)
+		log.Printf("[admin] export csv query error: %v", err)
 		b.SendMessage(ctx, &tgbot.SendMessageParams{
 			ChatID: chatID,
 			Text:   "❌ Ошибка при выгрузке данных.",
@@ -499,53 +506,84 @@ func (p *adminPanel) handleExportCSV(ctx context.Context, b *tgbot.Bot, chatID i
 		return
 	}
 
-	// Generate CSV in memory.
-	var buf bytes.Buffer
-	// UTF-8 BOM for Excel compatibility.
-	buf.Write([]byte{0xEF, 0xBB, 0xBF})
-	w := csv.NewWriter(&buf)
-
-	// Header row.
-	w.Write([]string{"tg_id", "username", "first_name", "last_name", "locale", "is_premium", "traffic_source", "created_at"})
-
-	for _, u := range users {
-		premium := "no"
-		if u.IsDonator {
-			premium = "yes"
-		}
-		w.Write([]string{
-			strconv.FormatInt(u.TelegramID, 10),
-			u.Username,
-			u.FirstName,
-			u.LastName,
-			u.Locale,
-			premium,
-			u.TrafficSourceID,
-			u.CreatedAt.Format("2006-01-02 15:04:05"),
+	buf, err := buildUsersCSV(users)
+	if err != nil {
+		log.Printf("[admin] export csv build error: %v", err)
+		b.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "❌ Ошибка при генерации файла.",
 		})
+		return
 	}
-	w.Flush()
 
-	// Build filename with today's date.
-	filename := fmt.Sprintf("subguard_users_export_%s.csv", time.Now().Format("2006_01_02"))
-
-	// Send the document.
-	_, sendErr := b.SendDocument(ctx, &tgbot.SendDocumentParams{
+	filename := fmt.Sprintf("subguard_users_%s.csv", time.Now().Format("20060102"))
+	if _, sendErr := b.SendDocument(ctx, &tgbot.SendDocumentParams{
 		ChatID: chatID,
 		Document: &models.InputFileUpload{
 			Filename: filename,
 			Data:     bytes.NewReader(buf.Bytes()),
 		},
-		Caption: fmt.Sprintf("✅ Экспорт завершён. В файле записей: *%d*", len(users)),
+		Caption:   fmt.Sprintf("✅ Экспорт завершён. В файле записей: *%d*", len(users)),
 		ParseMode: "Markdown",
-	})
-	if sendErr != nil {
+	}); sendErr != nil {
 		log.Printf("[admin] export csv send error: %v", sendErr)
 		b.SendMessage(ctx, &tgbot.SendMessageParams{
 			ChatID: chatID,
 			Text:   "❌ Ошибка при отправке файла.",
 		})
 	}
+}
+
+// buildUsersCSV renders the user roster to a UTF-8 CSV with a leading
+// BOM (so Excel auto-detects encoding) and human-readable headers
+// matching the export spec.
+//
+// All values are stringified explicitly: booleans → "yes"/"no",
+// timestamps → "YYYY-MM-DD HH:MM:SS UTC" so a downstream pivot table
+// doesn't choke on locale-specific date parsing.
+func buildUsersCSV(users []model.User) (*bytes.Buffer, error) {
+	var buf bytes.Buffer
+	// UTF-8 BOM for Excel auto-detect on Windows. Linux readers ignore it.
+	buf.Write([]byte{0xEF, 0xBB, 0xBF})
+
+	w := csv.NewWriter(&buf)
+	header := []string{
+		"Telegram ID", "Username", "First Name", "Last Name",
+		"Locale", "Premium", "Active", "Traffic Source", "Registration Date",
+	}
+	if err := w.Write(header); err != nil {
+		return nil, err
+	}
+
+	for _, u := range users {
+		premium := "no"
+		if u.IsDonator {
+			premium = "yes"
+		}
+		active := "no"
+		if u.IsActive {
+			active = "yes"
+		}
+		row := []string{
+			strconv.FormatInt(u.TelegramID, 10),
+			u.Username,
+			u.FirstName,
+			u.LastName,
+			u.Locale,
+			premium,
+			active,
+			u.TrafficSourceID,
+			u.CreatedAt.UTC().Format("2006-01-02 15:04:05"),
+		}
+		if err := w.Write(row); err != nil {
+			return nil, err
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, err
+	}
+	return &buf, nil
 }
 
 // ── Users Module ───────────────────────────────────────
