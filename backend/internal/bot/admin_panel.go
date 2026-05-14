@@ -426,6 +426,27 @@ func (p *adminPanel) handleStats(ctx context.Context, b *tgbot.Bot, chatID int64
 	sb.WriteString(fmt.Sprintf("• Добавлено сегодня: +%d\n", stats.SubsToday))
 	sb.WriteString(fmt.Sprintf("• Активных комнат: %d", stats.TotalRooms))
 
+	// ── Popular Services ──
+	popular, popErr := p.repo.GetPopularServices(10)
+	if popErr != nil {
+		log.Printf("[admin] popular services error: %v", popErr)
+	}
+	if len(popular) > 0 {
+		sb.WriteString("\n\n📈 *Популярные сервисы*\n")
+		for i, s := range popular {
+			medal := fmt.Sprintf("%d.", i+1)
+			switch i {
+			case 0:
+				medal = "🥇"
+			case 1:
+				medal = "🥈"
+			case 2:
+				medal = "🥉"
+			}
+			sb.WriteString(fmt.Sprintf("%s `%s` — %d\n", medal, escapeMarkdownLite(s.Name), s.Count))
+		}
+	}
+
 	kb := backButton()
 	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
 		ChatID:      chatID,
