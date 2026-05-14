@@ -67,6 +67,14 @@ interface RoomStore {
   updateRoom: (roomId: string, data: { billing_day?: number }) => Promise<void>;
 }
 
+// fetchDetail keeps its in-flight AbortController in module scope so a
+// rapid sequence of detail-opens (user closes a sheet and opens another
+// before the first response lands) cancels the stale request and only
+// the latest one populates activeDetail. Audit O4 — the previous code
+// could overwrite activeDetail with the previous room's data right as
+// the user switched.
+let detailAbort: AbortController | null = null;
+
 export const useRoomStore = create<RoomStore>((set, get) => ({
   rooms: [],
   activeDetail: null,
@@ -84,11 +92,19 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   },
 
   fetchDetail: async (id: string) => {
+    // Cancel any in-flight detail request before starting a new one.
+    detailAbort?.abort();
+    const ctrl = new AbortController();
+    detailAbort = ctrl;
     try {
-      const detail = await api<RoomDetailData>(`/rooms/${id}`);
+      const detail = await api<RoomDetailData>(`/rooms/${id}`, { signal: ctrl.signal });
+      // If a newer fetch superseded us mid-flight, drop the response.
+      if (detailAbort !== ctrl) return;
       set({ activeDetail: detail, error: null });
     } catch (err) {
       const e = err as ApiError;
+      // Aborted (status=0, "aborted") — caller superseded us, stay silent.
+      if (e?.status === 0 && e?.message === "aborted") return;
       // 401 is handled globally by api.ts (reload); other errors deserve a
       // visible toast so the user understands why the sheet is empty.
       set({ activeDetail: null, error: e?.message ?? "load failed" });
@@ -97,6 +113,8 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         if (e?.status === 403) toast.error("No access to this room");
         else toast.error("Failed to load room");
       }
+    } finally {
+      if (detailAbort === ctrl) detailAbort = null;
     }
   },
 
