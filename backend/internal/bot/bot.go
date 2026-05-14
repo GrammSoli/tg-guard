@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -134,25 +135,49 @@ func Setup(cfg *config.Config, db *gorm.DB, notifWorker *worker.NotificationWork
 // On unblock the user usually also fires /start, which handleStart will
 // re-confirm is_active=true. We still process the my_chat_member path
 // because a user can unblock without re-/starting (just unmute the chat).
+//
+// Status extraction is double-belted. The go-telegram lib has a custom
+// UnmarshalJSON that fills the ChatMember.Type field from the Telegram
+// wire "status" key. If for some reason that path fails (lib regression,
+// future Telegram status code we don't know about), we re-marshal the
+// NewChatMember and read the raw "status" string ourselves. Both paths
+// reach the same decision tree below; the JSON fallback only kicks in
+// when Type is empty.
 func handleMyChatMember(ctx context.Context, update *models.Update, db *gorm.DB) {
 	cmu := update.MyChatMember
-	if cmu == nil || cmu.Chat.Type != "private" {
+	if cmu == nil {
 		return
+	}
+
+	// One entry log per update — invaluable when prod looks idle and you
+	// need to verify Telegram is actually delivering the events.
+	status := string(cmu.NewChatMember.Type)
+	if status == "" {
+		status = extractStatusFromJSON(cmu.NewChatMember)
+	}
+	log.Printf("[bot/my_chat_member] event chat_type=%s from_tg=%d status=%q",
+		cmu.Chat.Type, cmu.From.ID, status)
+
+	if cmu.Chat.Type != "private" {
+		return // group/supergroup/channel — not user churn
 	}
 	tgID := cmu.From.ID
 	if tgID == 0 {
+		log.Printf("[bot/my_chat_member] skip: from_tg=0 (malformed update)")
 		return
 	}
 
 	var isActive bool
-	switch cmu.NewChatMember.Type {
-	case models.ChatMemberTypeBanned: // "kicked" in TG wire format
+	switch status {
+	case string(models.ChatMemberTypeBanned): // "kicked"
 		isActive = false
-	case models.ChatMemberTypeMember:
+	case string(models.ChatMemberTypeMember):
 		isActive = true
 	default:
 		// "left", "restricted", "administrator", "creator" — not meaningful
-		// for user-bot reachability in a private chat. Ignore.
+		// for user-bot reachability in a private chat. Empty (status
+		// extraction failed) also falls here.
+		log.Printf("[bot/my_chat_member] skip tg=%d: unhandled status=%q", tgID, status)
 		return
 	}
 
@@ -160,13 +185,33 @@ func handleMyChatMember(ctx context.Context, update *models.Update, db *gorm.DB)
 		Where("telegram_id = ?", tgID).
 		Update("is_active", isActive)
 	if res.Error != nil {
-		log.Printf("[bot/my_chat_member] update tg=%d active=%v: %v", tgID, isActive, res.Error)
+		log.Printf("[bot/my_chat_member] DB update tg=%d active=%v: %v", tgID, isActive, res.Error)
 		return
 	}
-	if res.RowsAffected > 0 {
-		log.Printf("[bot/my_chat_member] tg=%d is_active=%v (status=%s)",
-			tgID, isActive, cmu.NewChatMember.Type)
+	log.Printf("[bot/my_chat_member] DB updated tg=%d is_active=%v status=%s rows=%d",
+		tgID, isActive, status, res.RowsAffected)
+}
+
+// extractStatusFromJSON is the belt-and-suspenders fallback for reading
+// NewChatMember.status when the library's UnmarshalJSON didn't populate
+// the typed field. We re-marshal the (already-unmarshalled-once)
+// ChatMember struct and pull the "status" key from the resulting JSON.
+//
+// On any error we return "" rather than propagating — the caller logs
+// the empty status and skips the update, which is the safe default.
+func extractStatusFromJSON(cm models.ChatMember) string {
+	raw, err := json.Marshal(cm)
+	if err != nil {
+		return ""
 	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	if s, ok := m["status"].(string); ok {
+		return s
+	}
+	return ""
 }
 
 func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *config.Config, db *gorm.DB, adminRepo *repository.AdminRepo) {
@@ -587,6 +632,19 @@ func handleForceNotify(ctx context.Context, b *tgbot.Bot, update *models.Update,
 }
 
 // SetWebhook registers the webhook URL with Telegram.
+//
+// AllowedUpdates is set explicitly even though Telegram's default already
+// includes `my_chat_member`. Two reasons:
+//
+//  1. Intent visibility — anyone reading this code sees which update
+//     types we depend on, no spelunking through Telegram docs needed.
+//  2. Defence against silent API drift — Telegram has previously narrowed
+//     defaults; making the list explicit means our churn tracking won't
+//     mysteriously stop working if they do it again.
+//
+// `chat_member` (without `my_`) is deliberately omitted — it covers
+// membership changes of OTHER users in groups, which we don't need and
+// would 10× the webhook traffic on group bots.
 func SetWebhook(b *tgbot.Bot, cfg *config.Config) error {
 	webhookURL := cfg.BaseURL + "/webhook"
 	log.Printf("[bot] setting webhook: %s", webhookURL)
@@ -594,6 +652,11 @@ func SetWebhook(b *tgbot.Bot, cfg *config.Config) error {
 	_, err := b.SetWebhook(context.Background(), &tgbot.SetWebhookParams{
 		URL:         webhookURL,
 		SecretToken: cfg.WebhookSecret,
+		AllowedUpdates: []string{
+			"message",
+			"callback_query",
+			"my_chat_member",
+		},
 	})
 	return err
 }
