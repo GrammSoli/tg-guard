@@ -151,7 +151,12 @@ func (h *AdminHandler) Broadcast(c fiber.Ctx) error {
 	}
 
 	var count int64
-	h.db.Model(&model.User{}).Count(&count)
+	// Match the filter inside runBroadcast so the "recipients" number we
+	// return to the admin isn't inflated by banned/deleted/blocked users
+	// the actual run will skip.
+	h.db.Model(&model.User{}).
+		Where("is_banned = false AND deleted_at IS NULL AND is_active = true").
+		Count(&count)
 
 	go workerutil.Supervise("broadcast", func() {
 		h.runBroadcast(body.TextRU, body.TextEN, body.ImageURL)
@@ -174,8 +179,14 @@ func (h *AdminHandler) runBroadcast(textRU, textEN, imageURL string) {
 	defer ticker.Stop()
 
 	var sent, failed int
+	// Exclude banned, soft-deleted, and inactive (bot-blocked) users from
+	// the broadcast roster. Mirrors the filter in bot/broadcast.go and
+	// repository.CountBroadcastRecipients so the queued/recipients count
+	// returned from the HTTP handler matches what runBroadcast actually
+	// iterates.
 	err := h.db.WithContext(ctx).
 		Model(&model.User{}).
+		Where("is_banned = false AND deleted_at IS NULL AND is_active = true").
 		FindInBatches(&[]model.User{}, 500, func(tx *gorm.DB, _ int) error {
 			users, ok := tx.Statement.Dest.(*[]model.User)
 			if !ok {
