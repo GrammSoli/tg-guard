@@ -27,6 +27,7 @@ type User struct {
 	// as a string for simplicity — only the worker parses it. Interpreted in
 	// the user's Timezone above.
 	NotificationTime string    `gorm:"default:'10:00';size:5;not null" json:"notification_time"`
+	IsBanned         bool      `gorm:"default:false;not null" json:"is_banned"`
 	TrafficSourceID  string    `gorm:"size:64" json:"traffic_source_id,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`

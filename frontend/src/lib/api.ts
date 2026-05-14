@@ -41,6 +41,10 @@ export class ApiError extends Error {
 // manually; surfacing one clear toast is enough.
 let sessionExpiredHandled = false;
 
+// Global flag set when the server returns 403 account_banned.
+let bannedFlag = false;
+export function isBanned(): boolean { return bannedFlag; }
+
 function handleSessionExpired() {
   if (sessionExpiredHandled) return;
   sessionExpiredHandled = true;
@@ -71,6 +75,15 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     // Trigger a one-shot reload to pull a fresh initData from Telegram.
     handleSessionExpired();
     throw new ApiError(401, "session expired");
+  }
+
+  if (res.status === 403) {
+    const body = await res.text().catch(() => "");
+    if (body.includes("account_banned")) {
+      bannedFlag = true;
+      throw new ApiError(403, "account_banned");
+    }
+    throw new ApiError(403, body || "Forbidden");
   }
 
   if (!res.ok) {

@@ -8,6 +8,8 @@ import {
 
 import { Toaster } from "@/components/ui/sonner";
 import { GlobalModals } from "@/components/subguard/GlobalModals";
+import { BannedScreen } from "@/components/subguard/BannedScreen";
+import { isBanned } from "@/lib/api";
 
 function NotFoundComponent() {
   return (
@@ -66,17 +68,20 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  component: RootComponent,
-  notFoundComponent: NotFoundComponent,
-  errorComponent: ErrorComponent,
-});
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
+  {
+    component: RootComponent,
+    notFoundComponent: NotFoundComponent,
+    errorComponent: ErrorComponent,
+  },
+);
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   return (
     <QueryClientProvider client={queryClient}>
+      {isBanned() && <BannedScreen />}
       <Outlet />
       <GlobalModals />
       <Toaster />

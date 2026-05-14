@@ -239,6 +239,12 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	case strings.HasPrefix(data, "admin_offer_lang:"):
 		p.handleOfferLangPick(ctx, b, cb.From.ID, data, chatID, msgID)
 
+	case strings.HasPrefix(data, "admin_ban:"):
+		p.handleBanToggle(ctx, b, data, chatID, msgID)
+
+	case strings.HasPrefix(data, "admin_udel:"):
+		p.handleUserDelete(ctx, b, data, chatID, msgID)
+
 	default:
 		log.Printf("[admin] unhandled callback: %s", data)
 	}
@@ -376,7 +382,7 @@ func (p *adminPanel) handleUsersPrompt(ctx context.Context, b *tgbot.Bot, tgID, 
 	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
 		ChatID:    chatID,
 		MessageID: msgID,
-		Text:      "👤 Введите *Telegram ID* пользователя:",
+		Text:      "👤 Введите *Telegram ID* или *@username* пользователя:",
 		ParseMode: "Markdown",
 	})
 }
@@ -384,17 +390,25 @@ func (p *adminPanel) handleUsersPrompt(ctx context.Context, b *tgbot.Bot, tgID, 
 func (p *adminPanel) handleUserLookup(ctx context.Context, b *tgbot.Bot, adminTgID, chatID int64, text string) {
 	p.clearState(ctx, adminTgID)
 
-	lookupID, err := strconv.ParseInt(text, 10, 64)
-	if err != nil {
-		b.SendMessage(ctx, &tgbot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "❌ Некорректный Telegram ID. Введите /admin для меню.",
-		})
-		return
+	var user *model.User
+	var err error
+
+	if strings.HasPrefix(text, "@") {
+		username := strings.TrimPrefix(text, "@")
+		user, err = p.repo.FindUserByUsername(username)
+	} else {
+		lookupID, parseErr := strconv.ParseInt(text, 10, 64)
+		if parseErr != nil {
+			b.SendMessage(ctx, &tgbot.SendMessageParams{
+				ChatID: chatID,
+				Text:   "❌ Некорректный Telegram ID. Введите /admin для меню.",
+			})
+			return
+		}
+		user, err = p.repo.FindUserByTelegramID(lookupID)
 	}
 
-	user, err := p.repo.FindUserByTelegramID(lookupID)
-	if err != nil {
+	if err != nil || user == nil {
 		b.SendMessage(ctx, &tgbot.SendMessageParams{
 			ChatID: chatID,
 			Text:   "❌ Пользователь не найден.",
@@ -402,9 +416,18 @@ func (p *adminPanel) handleUserLookup(ctx context.Context, b *tgbot.Bot, adminTg
 		return
 	}
 
+	p.sendUserCard(ctx, b, chatID, 0, user)
+}
+
+// sendUserCard renders the user detail card. If msgID > 0 it edits, otherwise sends.
+func (p *adminPanel) sendUserCard(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int, user *model.User) {
 	premiumStatus := "нет"
 	if user.IsDonator {
 		premiumStatus = "✅ да"
+	}
+	banStatus := "нет"
+	if user.IsBanned {
+		banStatus = "🛑 да"
 	}
 
 	card := fmt.Sprintf(`👤 *Карточка пользователя*
@@ -414,6 +437,7 @@ func (p *adminPanel) handleUserLookup(ctx context.Context, b *tgbot.Bot, adminTg
 🆔 Telegram ID: %d
 🆔 Internal ID: %d
 💎 Premium: %s
+🚫 Бан: %s
 🕐 Регистрация: %s`,
 		escapeMarkdownLite(user.FirstName),
 		escapeMarkdownLite(user.LastName),
@@ -421,29 +445,49 @@ func (p *adminPanel) handleUserLookup(ctx context.Context, b *tgbot.Bot, adminTg
 		user.TelegramID,
 		user.ID,
 		premiumStatus,
+		banStatus,
 		user.CreatedAt.Format("02.01.2006"))
 
 	idStr := strconv.FormatUint(uint64(user.ID), 10)
+
+	banBtnText := "🛑 Заблокировать"
+	if user.IsBanned {
+		banBtnText = "✅ Разблокировать"
+	}
+
 	kb := models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{
 			{
 				{Text: "💎 Выдать Premium", CallbackData: "admin_premium_grant:" + idStr},
 				{Text: "🚫 Забрать Premium", CallbackData: "admin_premium_revoke:" + idStr},
 			},
+			{
+				{Text: banBtnText, CallbackData: "admin_ban:" + idStr},
+				{Text: "🗑 Удалить", CallbackData: "admin_udel:" + idStr},
+			},
 			{{Text: "🔙 Назад", CallbackData: "admin_back"}},
 		},
 	}
 
-	b.SendMessage(ctx, &tgbot.SendMessageParams{
-		ChatID:      chatID,
-		Text:        card,
-		ParseMode:   "Markdown",
-		ReplyMarkup: &kb,
-	})
+	if msgID > 0 {
+		b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+			ChatID:      chatID,
+			MessageID:   msgID,
+			Text:        card,
+			ParseMode:   "Markdown",
+			ReplyMarkup: &kb,
+		})
+	} else {
+		b.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID:      chatID,
+			Text:        card,
+			ParseMode:   "Markdown",
+			ReplyMarkup: &kb,
+		})
+	}
 }
 
 func (p *adminPanel) handlePremiumChange(ctx context.Context, b *tgbot.Bot, data string, grant bool, chatID int64, msgID int) {
-	// data = "admin_premium_grant:123" or "admin_premium_revoke:123"
 	parts := strings.SplitN(data, ":", 2)
 	if len(parts) < 2 {
 		return
@@ -458,15 +502,70 @@ func (p *adminPanel) handlePremiumChange(ctx context.Context, b *tgbot.Bot, data
 		return
 	}
 
-	status := "🚫 снят"
-	if grant {
-		status = "💎 выдан"
+	// Refresh the user card
+	var user model.User
+	if err := p.db.First(&user, uid).Error; err == nil {
+		p.sendUserCard(ctx, b, chatID, msgID, &user)
 	}
+}
+
+func (p *adminPanel) handleBanToggle(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
+	parts := strings.SplitN(data, ":", 2)
+	if len(parts) < 2 {
+		return
+	}
+	uid, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		return
+	}
+
+	var user model.User
+	if err := p.db.First(&user, uid).Error; err != nil {
+		return
+	}
+
+	newBanned := !user.IsBanned
+	if err := p.repo.SetBannedStatus(uint(uid), newBanned); err != nil {
+		log.Printf("[admin] ban toggle error: %v", err)
+		return
+	}
+
+	// Notify the user about ban
+	if newBanned {
+		banMsg := "🛑 Your account has been suspended for violating the terms of service."
+		if user.Locale == "ru" {
+			banMsg = "🛑 Ваш аккаунт был заблокирован за нарушение правил сервиса."
+		}
+		b.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID: user.TelegramID,
+			Text:   banMsg,
+		})
+	}
+
+	// Refresh the card
+	user.IsBanned = newBanned
+	p.sendUserCard(ctx, b, chatID, msgID, &user)
+}
+
+func (p *adminPanel) handleUserDelete(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
+	parts := strings.SplitN(data, ":", 2)
+	if len(parts) < 2 {
+		return
+	}
+	uid, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		return
+	}
+
+	if err := p.repo.SoftDeleteUser(uint(uid)); err != nil {
+		log.Printf("[admin] user delete error: %v", err)
+		return
+	}
+
 	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
 		ChatID:      chatID,
 		MessageID:   msgID,
-		Text:        fmt.Sprintf("✅ Premium %s пользователю #%d", status, uid),
-		ParseMode:   "Markdown",
+		Text:        fmt.Sprintf("🗑 Пользователь #%d удалён.", uid),
 		ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "🔙 Назад", CallbackData: "admin_back"}}}},
 	})
 }

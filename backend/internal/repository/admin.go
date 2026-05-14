@@ -120,6 +120,38 @@ func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 		}).Error
 }
 
+// ── User Management ────────────────────────────────────
+
+func (r *AdminRepo) FindUserByTelegramID(tgID int64) (*model.User, error) {
+	var u model.User
+	err := r.db.Where("telegram_id = ?", tgID).First(&u).Error
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *AdminRepo) FindUserByUsername(username string) (*model.User, error) {
+	var u model.User
+	err := r.db.Where("username = ?", username).First(&u).Error
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *AdminRepo) SetDonatorStatus(id uint, granted bool) error {
+	return r.db.Model(&model.User{}).Where("id = ?", id).Update("is_donator", granted).Error
+}
+
+func (r *AdminRepo) SetBannedStatus(id uint, banned bool) error {
+	return r.db.Model(&model.User{}).Where("id = ?", id).Update("is_banned", banned).Error
+}
+
+func (r *AdminRepo) SoftDeleteUser(id uint) error {
+	return r.db.Delete(&model.User{}, id).Error
+}
+
 // ── Traffic Campaigns ──────────────────────────────────
 
 func (r *AdminRepo) ListCampaigns() ([]model.TrafficCampaign, error) {
@@ -215,19 +247,4 @@ func (r *AdminRepo) IncrementClick(id uint) error {
 	return r.db.Model(&model.SponsoredOffer{}).
 		Where("id = ?", id).
 		UpdateColumn("clicks", gorm.Expr("clicks + 1")).Error
-}
-
-// ── User lookup (admin) ────────────────────────────────
-
-func (r *AdminRepo) FindUserByTelegramID(tgID int64) (*model.User, error) {
-	var u model.User
-	err := r.db.Where("telegram_id = ?", tgID).First(&u).Error
-	if err != nil {
-		return nil, err
-	}
-	return &u, nil
-}
-
-func (r *AdminRepo) SetDonatorStatus(userID uint, isDonator bool) error {
-	return r.db.Model(&model.User{}).Where("id = ?", userID).Update("is_donator", isDonator).Error
 }

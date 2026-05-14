@@ -118,6 +118,11 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 		db.Create(&user)
 	}
 
+	// Silently ignore banned users
+	if user.IsBanned {
+		return
+	}
+
 	// Parse deep link parameters: /start room_ABC123 or /start ad_campaign_tag
 	parts := strings.SplitN(update.Message.Text, " ", 2)
 	if len(parts) == 2 {

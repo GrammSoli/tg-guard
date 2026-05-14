@@ -105,7 +105,7 @@ func (w *NotificationWorker) check(ctx context.Context) {
 	dest := &[]model.Subscription{}
 	err := w.db.WithContext(ctx).
 		Preload("User", func(db *gorm.DB) *gorm.DB {
-			return db.Select("id, telegram_id, username, notifications_enabled, timezone, notification_time, locale")
+			return db.Select("id, telegram_id, username, notifications_enabled, timezone, notification_time, locale, is_banned")
 		}).
 		Where("next_payment_at BETWEEN ? AND ?", windowStart, windowEnd).
 		Where("notified_at IS NULL OR notified_at < ?", now.Add(-notificationDedupWindow)).
@@ -172,6 +172,10 @@ func (w *NotificationWorker) tryProcessOne(ctx context.Context, sub *model.Subsc
 	}
 	if !sub.User.NotificationsEnabled {
 		log.Printf("[notification-worker] skip %s sub %q: notifications disabled", userLabel, sub.Name)
+		return false
+	}
+	if sub.User.IsBanned {
+		log.Printf("[notification-worker] skip %s sub %q: user is banned", userLabel, sub.Name)
 		return false
 	}
 	if !shouldSendNow(sub, &sub.User, now) {

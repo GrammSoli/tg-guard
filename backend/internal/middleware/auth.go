@@ -128,6 +128,14 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 		}
 
 		c.Locals(contextKeyUser, &user)
+
+		// Block banned users from accessing the API.
+		if user.IsBanned {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "account_banned",
+			})
+		}
+
 		return c.Next()
 	}
 }
