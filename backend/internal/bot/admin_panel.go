@@ -215,10 +215,10 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	case data == "admin_traffic_new":
 		p.handleTrafficNewPrompt(ctx, b, cb.From.ID, chatID, msgID)
 
-	case strings.HasPrefix(data, "traf_v:"):
+	case strings.HasPrefix(data, "admin_tv:"):
 		p.handleTrafficView(ctx, b, data, chatID, msgID)
 
-	case strings.HasPrefix(data, "traf_d:"):
+	case strings.HasPrefix(data, "admin_td:"):
 		p.handleTrafficDelete(ctx, b, data, chatID, msgID)
 
 	case strings.HasPrefix(data, "admin_offer_view:"):
@@ -238,6 +238,9 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 
 	case strings.HasPrefix(data, "admin_offer_lang:"):
 		p.handleOfferLangPick(ctx, b, cb.From.ID, data, chatID, msgID)
+
+	default:
+		log.Printf("[admin] unhandled callback: %s", data)
 	}
 }
 
@@ -702,7 +705,7 @@ func (p *adminPanel) handleTrafficMenu(ctx context.Context, b *tgbot.Bot, chatID
 		label := fmt.Sprintf("%s — 🖱 %d | ✅ %d", c.Tag, c.BotStarts, c.Auths)
 		// Use tag ID to keep callback under 64 bytes.
 		buttons = append(buttons, []models.InlineKeyboardButton{
-			{Text: label, CallbackData: fmt.Sprintf("traf_v:%d", c.ID)},
+			{Text: label, CallbackData: fmt.Sprintf("admin_tv:%d", c.ID)},
 		})
 	}
 
@@ -721,7 +724,7 @@ func (p *adminPanel) handleTrafficMenu(ctx context.Context, b *tgbot.Bot, chatID
 }
 
 func (p *adminPanel) handleTrafficView(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
-	// data = "traf_v:42"
+	// data = "admin_tv:42"
 	parts := strings.SplitN(data, ":", 2)
 	if len(parts) < 2 {
 		return
@@ -750,7 +753,7 @@ func (p *adminPanel) handleTrafficView(ctx context.Context, b *tgbot.Bot, data s
 
 	kb := models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{
-			{{Text: "🗑 Удалить кампанию", CallbackData: fmt.Sprintf("traf_d:%d", campaign.ID)}},
+			{{Text: "🗑 Удалить кампанию", CallbackData: fmt.Sprintf("admin_td:%d", campaign.ID)}},
 			{{Text: "🔙 К списку", CallbackData: "admin_traffic"}},
 		},
 	}
@@ -765,7 +768,7 @@ func (p *adminPanel) handleTrafficView(ctx context.Context, b *tgbot.Bot, data s
 }
 
 func (p *adminPanel) handleTrafficDelete(ctx context.Context, b *tgbot.Bot, data string, chatID int64, msgID int) {
-	// data = "traf_d:42"
+	// data = "admin_td:42"
 	parts := strings.SplitN(data, ":", 2)
 	if len(parts) < 2 {
 		return
