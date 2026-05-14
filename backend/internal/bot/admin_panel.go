@@ -719,6 +719,8 @@ func (p *adminPanel) handleTrafficNewPrompt(ctx context.Context, b *tgbot.Bot, t
 func (p *adminPanel) handleTrafficCreate(ctx context.Context, b *tgbot.Bot, tgID, chatID int64, tag string) {
 	p.clearState(ctx, tgID)
 
+	// Strip leading/trailing whitespace; allow underscores (Telegram supports them).
+	tag = strings.TrimSpace(tag)
 	if tag == "" || strings.ContainsAny(tag, " \t\n") {
 		b.SendMessage(ctx, &tgbot.SendMessageParams{
 			ChatID: chatID,
@@ -729,10 +731,8 @@ func (p *adminPanel) handleTrafficCreate(ctx context.Context, b *tgbot.Bot, tgID
 
 	fullTag := "ad_" + tag
 
-	// Upsert the campaign row
-	p.repo.IncrementCampaign(fullTag, "clicks")
-	// Reset the click we just added — we only want to create the row
-	p.db.Model(&model.TrafficCampaign{}).Where("tag = ?", fullTag).Update("clicks", 0)
+	// Eagerly create the campaign row so it shows up in the list immediately.
+	p.repo.EnsureCampaign(fullTag)
 
 	// Get bot username for the link
 	botInfo, err := b.GetMe(ctx)
@@ -743,9 +743,11 @@ func (p *adminPanel) handleTrafficCreate(ctx context.Context, b *tgbot.Bot, tgID
 
 	link := fmt.Sprintf("https://t.me/%s?start=%s", botUsername, fullTag)
 
+	// Use code blocks (backticks) for tag and link to prevent Markdown
+	// from eating underscores as italic markup.
 	b.SendMessage(ctx, &tgbot.SendMessageParams{
 		ChatID:    chatID,
-		Text:      fmt.Sprintf("✅ Ссылка создана!\n\n🏷 Тег: `%s`\n🔗 Ссылка: %s", fullTag, link),
+		Text:      fmt.Sprintf("✅ Ссылка создана!\n\n🏷 Тег: `%s`\n🔗 Ссылка:\n`%s`", fullTag, link),
 		ParseMode: "Markdown",
 		ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 			{{Text: "🔙 К трафику", CallbackData: "admin_traffic"}},

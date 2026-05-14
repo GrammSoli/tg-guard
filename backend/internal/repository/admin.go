@@ -143,6 +143,16 @@ func (r *AdminRepo) IncrementCampaign(tag string, field string) error {
 	).Error
 }
 
+// EnsureCampaign creates a campaign row if it doesn't exist yet (eager creation).
+func (r *AdminRepo) EnsureCampaign(tag string) error {
+	return r.db.Exec(
+		`INSERT INTO traffic_campaigns (tag, clicks, bot_starts, auths, created_at, updated_at)
+		 VALUES (?, 0, 0, 0, NOW(), NOW())
+		 ON CONFLICT (tag) DO NOTHING`,
+		tag,
+	).Error
+}
+
 // ── Sponsored Offers ───────────────────────────────────
 
 func (r *AdminRepo) ListOffers() ([]model.SponsoredOffer, error) {
