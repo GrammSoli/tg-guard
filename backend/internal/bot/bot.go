@@ -309,9 +309,12 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 	// /start during a window also gets the stub, not the join flow.
 	if !cfg.IsAdmin(tgUser.ID) {
 		if s, settErr := adminRepo.GetSettings(); settErr == nil && s.MaintenanceMode {
-			locale := "en"
-			if user.Locale == "ru" || strings.HasPrefix(tgUser.LanguageCode, "ru") {
-				locale = "ru"
+			// Prefer the user's stored locale (their explicit choice);
+			// fall back to the Telegram client language for users who
+			// haven't been through onboarding yet.
+			locale := user.Locale
+			if locale == "" {
+				locale = tgUser.LanguageCode
 			}
 			b.SendMessage(ctx, &tgbot.SendMessageParams{
 				ChatID:    chatID,
@@ -378,11 +381,15 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 // sends non-admin users for /start while AppSettings.maintenance_mode is
 // on — keeps the bot's text surface in sync with the API MaintenanceGuard
 // and the WebApp's MaintenanceScreen. HTML parse mode (the <b> tag).
+//
+// English only for an explicit "en*" locale (covers "en", "en-US");
+// everything else — "ru", any other code, or empty — falls back to
+// Russian, the project's primary audience.
 func maintenanceMessage(locale string) string {
-	if locale == "ru" {
-		return "🛠 <b>Технические работы</b>\n\nПрикручиваем новые фичи, скоро вернёмся ☕️"
+	if strings.HasPrefix(locale, "en") {
+		return "🛠 <b>Maintenance Break</b>\n\nWe are adding new features, we'll be right back ☕️"
 	}
-	return "🛠 <b>Under maintenance</b>\n\nBolting on new features — back in a moment ☕️"
+	return "🛠 <b>Технические работы</b>\n\nПрикручиваем новые фичи, скоро вернёмся ☕️"
 }
 
 // handleRenewCallback processes the inline "Paid (Renew)" button attached
