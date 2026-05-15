@@ -235,7 +235,7 @@ func main() {
 		StackTraceHandler: func(c fiber.Ctx, e any) {
 			stack := debug.Stack()
 			log.Printf("[recover] panic on %s %s: %v\n%s", c.Method(), c.Path(), e, stack)
-			observability.CapturePanic("http:"+c.Path(), e, stack)
+			observability.CapturePanicWithUser("http:"+c.Path(), sentryUserFromCtx(c), e, stack)
 		},
 	}))
 	app.Use(logger.New())
@@ -386,9 +386,26 @@ func globalErrorHandler(c fiber.Ctx, err error) error {
 	// into a 500 were already reported by its StackTraceHandler, but
 	// re-capturing here is harmless: Sentry dedups by fingerprint.
 	if code >= 500 {
-		observability.CaptureHTTPError(c.Method(), c.Path(), code, err)
+		observability.CaptureHTTPError(c.Method(), c.Path(), code, sentryUserFromCtx(c), err)
 	}
 	return c.Status(code).JSON(fiber.Map{"error": err.Error()})
+}
+
+// sentryUserFromCtx pulls the authenticated user out of the Fiber
+// request context and adapts it to observability.UserInfo. Returns nil
+// when the request never authenticated (panic before auth middleware,
+// the /webhook route, /health) — the event is still captured, just
+// without user attribution.
+func sentryUserFromCtx(c fiber.Ctx) *observability.UserInfo {
+	u := middleware.UserFromCtx(c)
+	if u == nil {
+		return nil
+	}
+	return &observability.UserInfo{
+		InternalID: u.ID,
+		TelegramID: u.TelegramID,
+		Username:   u.Username,
+	}
 }
 
 // envInt reads an integer env var with a fallback.
