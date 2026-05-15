@@ -106,7 +106,10 @@ func main() {
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_en INTEGER NOT NULL DEFAULT 100`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_usd_ru INTEGER NOT NULL DEFAULT 1`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_usd_en INTEGER NOT NULL DEFAULT 2`)
-		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id + paywall + kill-switch columns exist")
+		// Idempotent charge-ID column on donations (Stars webhook dedup)
+		_, _ = sqlDB.Exec(`ALTER TABLE donations ADD COLUMN IF NOT EXISTS telegram_payment_charge_id VARCHAR(128) NOT NULL DEFAULT ''`)
+		_, _ = sqlDB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_donations_charge_id ON donations (telegram_payment_charge_id) WHERE telegram_payment_charge_id != ''`)
+		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id + paywall + kill-switch + donation charge-id columns exist")
 	}
 
 	// Auto-migrate only in test/dev. Production should run a dedicated
@@ -309,6 +312,12 @@ func main() {
 	auth.Patch("/me", userH.UpdateMe)
 	auth.Get("/me/export", userH.ExportMe)
 	auth.Delete("/me", userH.DeleteMe)
+
+	// Payments (Stars)
+	if tgBot != nil {
+		paymentH := handler.NewPaymentHandler(db, cfg, tgBot)
+		auth.Post("/payments/stars", paymentH.CreateStarsInvoice)
+	}
 
 	// Public config (paywall limits — available to all authenticated users)
 	auth.Get("/config", adminH.GetPublicConfig)

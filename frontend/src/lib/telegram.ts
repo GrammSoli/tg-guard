@@ -161,6 +161,43 @@ export function getTelegramUser(): TelegramUser | null {
   }
 }
 
+// ─── Payments (Stars) ──────────────────────────────────────────
+
+/**
+ * openInvoice — opens Telegram's native payment sheet for a Stars invoice.
+ *
+ * Returns a Promise that resolves with the payment status string:
+ *   "paid"      — user completed the payment
+ *   "cancelled" — user closed the payment sheet
+ *   "failed"    — payment failed
+ *   "pending"   — payment is still processing
+ *
+ * Falls back to rejecting with an Error when running outside Telegram.
+ */
+export function openInvoice(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+      const wa = tg();
+      if (!wa) {
+        reject(new Error("Not running inside Telegram"));
+        return;
+      }
+      const openInvoiceFn = wa.openInvoice as
+        | ((url: string, cb: (status: string) => void) => void)
+        | undefined;
+      if (!openInvoiceFn) {
+        reject(new Error("openInvoice not available"));
+        return;
+      }
+      openInvoiceFn(url, (status: string) => {
+        resolve(status);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 // ─── Init ──────────────────────────────────────────────────────
 
 export function initTelegramApp() {

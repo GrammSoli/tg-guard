@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +46,19 @@ func Setup(
 
 	opts := []tgbot.Option{
 		tgbot.WithDefaultHandler(func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
+			// ── Stars payment webhooks ────────────────────────
+			// PreCheckoutQuery MUST be answered within 10 seconds or
+			// the payment button spins indefinitely in the user's app.
+			if update.PreCheckoutQuery != nil {
+				handlePreCheckoutQuery(ctx, b, update)
+				return
+			}
+			// SuccessfulPayment arrives inside a Message update.
+			if update.Message != nil && update.Message.SuccessfulPayment != nil {
+				handleSuccessfulPayment(ctx, b, update, db)
+				return
+			}
+
 			// Route admin FSM text input before dropping unknown updates.
 			if update.Message != nil && update.Message.From != nil && cfg.IsAdmin(update.Message.From.ID) {
 				state := panel.getState(ctx, update.Message.From.ID)
@@ -799,7 +813,134 @@ func SetWebhook(b *tgbot.Bot, cfg *config.Config) error {
 			"message",
 			"callback_query",
 			"my_chat_member",
+			"pre_checkout_query",
 		},
 	})
 	return err
+}
+
+// ── Stars Payment Handlers ──────────────────────────────────────────
+
+// handlePreCheckoutQuery auto-confirms every pre-checkout query from
+// Telegram. For Telegram Stars (XTR) there is no shipping or provider
+// validation to perform — the bot MUST answer within 10 seconds or the
+// payment button hangs indefinitely in the user's client.
+func handlePreCheckoutQuery(ctx context.Context, b *tgbot.Bot, update *models.Update) {
+	pcq := update.PreCheckoutQuery
+	if pcq == nil {
+		return
+	}
+	log.Printf("[bot/pre_checkout] query=%s payload=%q from_tg=%d amount=%d %s",
+		pcq.ID, pcq.InvoicePayload, pcq.From.ID, pcq.TotalAmount, pcq.Currency)
+
+	if _, err := b.AnswerPreCheckoutQuery(ctx, &tgbot.AnswerPreCheckoutQueryParams{
+		PreCheckoutQueryID: pcq.ID,
+		OK:                 true,
+	}); err != nil {
+		log.Printf("[bot/pre_checkout] AnswerPreCheckoutQuery error: %v", err)
+	}
+}
+
+// handleSuccessfulPayment processes a completed Stars payment. It:
+//  1. Parses the invoice payload to extract the internal user ID.
+//  2. Deduplicates via TelegramPaymentChargeID (Telegram retries on
+//     non-200 / slow responses, so we'd otherwise create duplicate
+//     Donation rows and spam the user with "thank you" messages).
+//  3. Activates premium (is_donator = true) and logs a Donation row.
+//  4. Sends a localized congratulation message to the user.
+func handleSuccessfulPayment(ctx context.Context, b *tgbot.Bot, update *models.Update, db *gorm.DB) {
+	msg := update.Message
+	if msg == nil || msg.SuccessfulPayment == nil {
+		return
+	}
+	payment := msg.SuccessfulPayment
+	log.Printf("[bot/payment] SuccessfulPayment charge=%s payload=%q amount=%d %s from_tg=%d",
+		payment.TelegramPaymentChargeID, payment.InvoicePayload,
+		payment.TotalAmount, payment.Currency, msg.From.ID)
+
+	// ── Step 1: Safe payload parsing ──────────────────────────
+	// Expected format: "premium_stars_<userID>"
+	if !strings.HasPrefix(payment.InvoicePayload, "premium_stars_") {
+		log.Printf("[bot/payment] unknown payload=%q, ignoring", payment.InvoicePayload)
+		return
+	}
+	parts := strings.Split(payment.InvoicePayload, "_")
+	if len(parts) != 3 {
+		log.Printf("[bot/payment] malformed payload=%q (expected 3 parts, got %d)", payment.InvoicePayload, len(parts))
+		return
+	}
+	userID, err := strconv.ParseUint(parts[2], 10, 64)
+	if err != nil {
+		log.Printf("[bot/payment] invalid user ID in payload=%q: %v", payment.InvoicePayload, err)
+		return
+	}
+
+	// ── Step 2: Idempotency — dedup by TelegramPaymentChargeID ──
+	chargeID := payment.TelegramPaymentChargeID
+	if chargeID == "" {
+		log.Printf("[bot/payment] empty charge ID, ignoring (should never happen)")
+		return
+	}
+	var existingDonation model.Donation
+	if err := db.WithContext(ctx).
+		Where("telegram_payment_charge_id = ?", chargeID).
+		First(&existingDonation).Error; err == nil {
+		// Already processed — Telegram retried the webhook.
+		log.Printf("[bot/payment] duplicate charge=%s for user=%d, skipping", chargeID, userID)
+		return
+	}
+
+	// ── Step 3: Find user and activate premium ──────────────────
+	var user model.User
+	if err := db.WithContext(ctx).First(&user, "id = ?", uint(userID)).Error; err != nil {
+		log.Printf("[bot/payment] user=%d not found: %v", userID, err)
+		return
+	}
+
+	// Activate premium + log donation in a single transaction.
+	txErr := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.User{}).
+			Where("id = ?", user.ID).
+			Update("is_donator", true).Error; err != nil {
+			return fmt.Errorf("set is_donator: %w", err)
+		}
+
+		donation := model.Donation{
+			UserID:                  user.ID,
+			TelegramID:              user.TelegramID,
+			TelegramPaymentChargeID: chargeID,
+			Amount:                  payment.TotalAmount,
+		}
+		if err := tx.Create(&donation).Error; err != nil {
+			return fmt.Errorf("create donation: %w", err)
+		}
+		return nil
+	})
+	if txErr != nil {
+		log.Printf("[bot/payment] tx error for user=%d charge=%s: %v", user.ID, chargeID, txErr)
+		return
+	}
+	log.Printf("[bot/payment] premium activated for user=%d charge=%s amount=%d",
+		user.ID, chargeID, payment.TotalAmount)
+
+	// ── Step 4: Localized congratulation ────────────────────────
+	locale := user.Locale
+	if locale == "" && msg.From != nil {
+		locale = msg.From.LanguageCode
+	}
+
+	var text string
+	if strings.HasPrefix(locale, "ru") {
+		text = "🎉 <b>Спасибо за покупку!</b>\n\nPremium успешно активирован. Вернитесь в приложение, чтобы пользоваться всеми функциями!"
+	} else {
+		text = "🎉 <b>Thank you for your purchase!</b>\n\nPremium is activated. Return to the app to enjoy all features!"
+	}
+
+	if _, err := b.SendMessage(ctx, &tgbot.SendMessageParams{
+		ChatID:    msg.Chat.ID,
+		Text:      text,
+		ParseMode: "HTML",
+	}); err != nil {
+		log.Printf("[bot/payment] congratulation send error for user=%d: %v", user.ID, err)
+	}
 }

@@ -186,12 +186,19 @@ type AppSettings struct {
 }
 
 // Donation logs a successful Telegram Stars payment.
+//
+// TelegramPaymentChargeID is Telegram's unique transaction identifier
+// (from SuccessfulPayment). Indexed as UNIQUE to make webhook processing
+// idempotent — Telegram retries SuccessfulPayment on non-200/timeout, and
+// without this guard we'd create duplicate rows and spam the user with
+// repeated "thank you" messages.
 type Donation struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	UserID     uint      `gorm:"index;not null" json:"user_id"`
-	TelegramID int64     `json:"telegram_id"`
-	Amount     int       `json:"amount"` // in Telegram Stars
-	CreatedAt  time.Time `json:"created_at"`
+	ID                       uint      `gorm:"primaryKey" json:"id"`
+	UserID                   uint      `gorm:"index;not null" json:"user_id"`
+	TelegramID               int64     `json:"telegram_id"`
+	TelegramPaymentChargeID  string    `gorm:"uniqueIndex;size:128;not null" json:"telegram_payment_charge_id"`
+	Amount                   int       `json:"amount"` // in Telegram Stars
+	CreatedAt                time.Time `json:"created_at"`
 }
 
 // SponsoredOffer is an admin-created promotional card displayed in the

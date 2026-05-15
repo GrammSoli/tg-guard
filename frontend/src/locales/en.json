@@ -292,6 +292,8 @@
   "premium.unlimitedRoomsHint": "Create unlimited shared rooms and split costs freely.",
   "premium.upgrade": "Upgrade Now",
   "premium.later": "Maybe later",
+  "premium.success_toast": "Premium activated!",
+  "premium.payment_failed": "Failed to create payment",
   "maintenance.title": "Maintenance Break",
   "maintenance.subtitle": "We are adding new features, we'll be right back ☕️"
 }
