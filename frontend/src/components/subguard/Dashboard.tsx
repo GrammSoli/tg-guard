@@ -237,15 +237,6 @@ export function Dashboard({ user }: Props) {
   return (
     <>
       <div className="bg-background min-h-[100dvh] pb-32">
-        {/* TEMP: Sentry smoke-test button — DELETE before committing. */}
-        <button
-          onClick={() => {
-            throw new Error("Тестовая ошибка Sentry! Мы в эфире!");
-          }}
-          style={{ padding: "10px", background: "red", color: "white", margin: "20px" }}
-        >
-          💥 Сломать приложение (Sentry Test)
-        </button>
         {tab !== "settings" && (
           loading ? (
             <SummaryHeaderSkeleton />
