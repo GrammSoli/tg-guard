@@ -210,6 +210,8 @@ func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 			"paywall_enabled":         s.PaywallEnabled,
 			"free_subs_limit":         s.FreeSubsLimit,
 			"free_room_limit":         s.FreeRoomLimit,
+			"maintenance_mode":        s.MaintenanceMode,
+			"pause_notifications":     s.PauseNotifications,
 		}).Error
 }
 

@@ -98,7 +98,10 @@ func main() {
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS paywall_enabled BOOLEAN NOT NULL DEFAULT false`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_subs_limit INTEGER NOT NULL DEFAULT 6`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_room_limit INTEGER NOT NULL DEFAULT 1`)
-		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id + paywall columns exist")
+		// Emergency kill-switch columns on app_settings
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN NOT NULL DEFAULT false`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS pause_notifications BOOLEAN NOT NULL DEFAULT false`)
+		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id + paywall + kill-switch columns exist")
 	}
 
 	// Auto-migrate only in test/dev. Production should run a dedicated
@@ -283,6 +286,12 @@ func main() {
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit"})
 		},
 	}))
+
+	// Maintenance kill-switch. 503s every non-admin /api request while
+	// AppSettings.maintenance_mode is on. Placed after auth+limiter so
+	// admin routes (which it skips by path) are still reachable and the
+	// switch can be flipped back off from the bot at any time.
+	auth.Use(middleware.MaintenanceGuard(db))
 
 	// User
 	userH := handler.NewUserHandler(cfg, db).WithNotifier(n).WithLifecycle(ctx, &workerWG)

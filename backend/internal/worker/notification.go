@@ -85,6 +85,20 @@ func (w *NotificationWorker) check(ctx context.Context) {
 	default:
 	}
 
+	// Notification kill-switch. When the admin has flipped
+	// pause_notifications on, skip the whole tick — nothing is sent and
+	// nothing is marked notified, so once the switch is flipped back
+	// every due reminder fires on the next tick exactly as normal.
+	var appSettings model.AppSettings
+	if err := w.db.WithContext(ctx).Select("pause_notifications").First(&appSettings, 1).Error; err != nil {
+		// Fail open: a settings-read error shouldn't silently stop
+		// reminders. Log and proceed with the normal tick.
+		log.Printf("[notification-worker] settings read failed, proceeding: %v", err)
+	} else if appSettings.PauseNotifications {
+		log.Println("[notification-worker] ── tick skipped ── pause_notifications is ON")
+		return
+	}
+
 	now := time.Now().UTC()
 	log.Printf("[notification-worker] ── tick ── UTC now: %s", now.Format(time.RFC3339))
 

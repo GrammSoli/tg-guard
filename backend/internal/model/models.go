@@ -165,6 +165,15 @@ type AppSettings struct {
 	PaywallEnabled         bool   `gorm:"default:false" json:"paywall_enabled"`
 	FreeSubsLimit          int    `gorm:"default:6" json:"free_subs_limit"`
 	FreeRoomLimit          int    `gorm:"default:1" json:"free_room_limit"`
+	// Emergency kill-switches, toggled from the in-bot admin panel.
+	//   MaintenanceMode — when true the maintenance middleware answers
+	//     every non-admin /api request with 503; the mini-app shows a
+	//     full-screen "be right back" stub.
+	//   PauseNotifications — when true the notification worker skips its
+	//     send tick entirely (reminders not sent, not marked — so they
+	//     fire normally once the switch is flipped back off).
+	MaintenanceMode        bool   `gorm:"default:false;not null" json:"maintenance_mode"`
+	PauseNotifications     bool   `gorm:"default:false;not null" json:"pause_notifications"`
 }
 
 // Donation logs a successful Telegram Stars payment.
