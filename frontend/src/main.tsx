@@ -1,9 +1,30 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
+import * as Sentry from "@sentry/react";
 import { getRouter } from "./router";
 import "./styles.css";
 import "@/lib/i18n";
+
+// ── Sentry ───────────────────────────────────────────────
+// No-op when VITE_SENTRY_DSN is unset (local dev needs no account).
+// @sentry/react auto-installs window 'error' + 'unhandledrejection'
+// handlers on init, so uncaught errors and rejected promises ship
+// without extra wiring. RootErrorBoundary below additionally reports
+// React render errors with the component stack.
+const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN as string | undefined;
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: import.meta.env.MODE,
+    release: import.meta.env.VITE_APP_VERSION as string | undefined,
+    // Errors only — no perf tracing, keeps event volume + quota low.
+    tracesSampleRate: 0,
+    // Aborted fetches (user navigated away) and bare promise rejections
+    // are expected noise in a Telegram WebView — drop them.
+    ignoreErrors: ["AbortError", "Non-Error promise rejection captured"],
+  });
+}
 
 const router = getRouter();
 
@@ -27,6 +48,14 @@ class RootErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("[root-error-boundary]", error, info);
+    // Ship the render error with its component stack so Sentry shows
+    // which subtree threw, not just the JS stack. No-op without a DSN.
+    Sentry.captureException(error, {
+      contexts: {
+        react: { componentStack: info.componentStack },
+      },
+      tags: { boundary: "root" },
+    });
   }
 
   reset = () => {

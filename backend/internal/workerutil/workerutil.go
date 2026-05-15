@@ -28,6 +28,16 @@ import (
 // enough that operators don't notice an outage in normal monitoring.
 const supervisorCooldown = 5 * time.Second
 
+// PanicHook, when set, is invoked on every recovered worker panic with
+// the worker name, the recovered value, and the captured stack. main.go
+// wires this to observability.CapturePanic so panics reach Sentry.
+//
+// It's a package-level var rather than a Supervise parameter so this
+// leaf package keeps zero non-stdlib imports (the Sentry SDK is heavy
+// and we don't want it pulled into workerutil's test binary). nil hook
+// = log-only behaviour, exactly as before.
+var PanicHook func(source string, recovered interface{}, stack []byte)
+
 // Supervise runs fn in the current goroutine, recovers from panics, logs the
 // stack trace under [name], and restarts fn after a cool-off. It returns
 // only when fn returns normally (which workers typically do only on
@@ -46,7 +56,11 @@ func Supervise(name string, fn func()) {
 		exited := func() (panicked bool) {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("[%s] PANIC: %v\n%s", name, r, debug.Stack())
+					stack := debug.Stack()
+					log.Printf("[%s] PANIC: %v\n%s", name, r, stack)
+					if PanicHook != nil {
+						PanicHook(name, r, stack)
+					}
 					panicked = true
 				}
 			}()
