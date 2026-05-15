@@ -21,8 +21,8 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/subguard/backend/internal/bot"
 	tgbot "github.com/go-telegram/bot"
+	"github.com/subguard/backend/internal/bot"
 	"github.com/subguard/backend/internal/config"
 	"github.com/subguard/backend/internal/handler"
 	"github.com/subguard/backend/internal/middleware"
@@ -101,11 +101,6 @@ func main() {
 		// Emergency kill-switch columns on app_settings
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN NOT NULL DEFAULT false`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS pause_notifications BOOLEAN NOT NULL DEFAULT false`)
-		// Premium pricing columns on app_settings (locale-split)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_ru INTEGER NOT NULL DEFAULT 50`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_en INTEGER NOT NULL DEFAULT 100`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_usd_ru INTEGER NOT NULL DEFAULT 1`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_usd_en INTEGER NOT NULL DEFAULT 2`)
 		// Plan-split (Month / Lifetime) pricing + premium expiry
 		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_expires_at TIMESTAMPTZ`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_month_ru INTEGER NOT NULL DEFAULT 75`)

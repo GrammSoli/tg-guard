@@ -28,12 +28,12 @@ type TrafficSourceStat struct {
 
 type StatsResult struct {
 	// Users cohorts
-	TotalUsers    int64 `json:"total_users"`
-	ActiveUsers   int64 `json:"active_users"`
-	ChurnedUsers  int64 `json:"churned_users"`
-	UsersToday    int64 `json:"users_today"`
+	TotalUsers     int64 `json:"total_users"`
+	ActiveUsers    int64 `json:"active_users"`
+	ChurnedUsers   int64 `json:"churned_users"`
+	UsersToday     int64 `json:"users_today"`
 	UsersYesterday int64 `json:"users_yesterday"`
-	UsersWeek     int64 `json:"users_week"`
+	UsersWeek      int64 `json:"users_week"`
 
 	// Locale breakdown
 	LocaleRU    int64 `json:"locale_ru"`
@@ -41,8 +41,8 @@ type StatsResult struct {
 	LocaleOther int64 `json:"locale_other"`
 
 	// Monetization
-	Donators      int64 `json:"donators"`
-	DonorsToday   int64 `json:"donors_today"`
+	Donators    int64 `json:"donators"`
+	DonorsToday int64 `json:"donors_today"`
 
 	// Content
 	TotalSubscriptions int64 `json:"total_subscriptions"`
@@ -203,19 +203,21 @@ func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 	return r.db.Model(&model.AppSettings{}).
 		Where("id = ?", 1).
 		Updates(map[string]interface{}{
-			"cpa_enabled":             s.CPAEnabled,
-			"recommendations_enabled": s.RecommendationsEnabled,
-			"channel_gate_enabled":    s.ChannelGateEnabled,
-			"target_channel":          s.TargetChannel,
-			"paywall_enabled":         s.PaywallEnabled,
-			"free_subs_limit":         s.FreeSubsLimit,
-			"free_room_limit":         s.FreeRoomLimit,
-			"maintenance_mode":        s.MaintenanceMode,
-			"pause_notifications":     s.PauseNotifications,
-			"price_stars_ru":          s.PriceStarsRU,
-			"price_stars_en":          s.PriceStarsEN,
-			"price_crypto_usd_ru":     s.PriceCryptoUsdRU,
-			"price_crypto_usd_en":     s.PriceCryptoUsdEN,
+			"cpa_enabled":               s.CPAEnabled,
+			"recommendations_enabled":   s.RecommendationsEnabled,
+			"channel_gate_enabled":      s.ChannelGateEnabled,
+			"target_channel":            s.TargetChannel,
+			"paywall_enabled":           s.PaywallEnabled,
+			"free_subs_limit":           s.FreeSubsLimit,
+			"free_room_limit":           s.FreeRoomLimit,
+			"maintenance_mode":          s.MaintenanceMode,
+			"pause_notifications":       s.PauseNotifications,
+			"price_stars_month_ru":      s.PriceStarsMonthRU,
+			"price_stars_lifetime_ru":   s.PriceStarsLifetimeRU,
+			"price_stars_month_en":      s.PriceStarsMonthEN,
+			"price_stars_lifetime_en":   s.PriceStarsLifetimeEN,
+			"price_crypto_month_usd":    s.PriceCryptoMonthUSD,
+			"price_crypto_lifetime_usd": s.PriceCryptoLifetimeUSD,
 		}).Error
 }
 

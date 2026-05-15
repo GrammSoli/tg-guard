@@ -9,16 +9,16 @@ import (
 
 // User represents a Telegram user registered in SubGuard.
 type User struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
-	TelegramID      int64     `gorm:"uniqueIndex;not null" json:"telegram_id"`
-	FirstName       string    `json:"first_name"`
-	LastName        string    `json:"last_name"`
-	Username        string    `json:"username"`
-	PhotoURL        string    `json:"photo_url,omitempty"`
-	Locale          string    `gorm:"default:en;size:5" json:"locale"`
-	Timezone        string    `gorm:"default:UTC;size:64" json:"timezone"`
-	BaseCurrency    string    `gorm:"default:USD;size:3" json:"base_currency"`
-	IsDonator       bool      `gorm:"default:false" json:"is_donator"`
+	ID           uint   `gorm:"primaryKey" json:"id"`
+	TelegramID   int64  `gorm:"uniqueIndex;not null" json:"telegram_id"`
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
+	Username     string `json:"username"`
+	PhotoURL     string `json:"photo_url,omitempty"`
+	Locale       string `gorm:"default:en;size:5" json:"locale"`
+	Timezone     string `gorm:"default:UTC;size:64" json:"timezone"`
+	BaseCurrency string `gorm:"default:USD;size:3" json:"base_currency"`
+	IsDonator    bool   `gorm:"default:false" json:"is_donator"`
 	// PremiumExpiresAt is when a time-limited Premium grant lapses. NULL
 	// means lifetime (or no Premium at all — disambiguate via IsDonator).
 	// The premium-expiration worker clears IsDonator once now() passes it.
@@ -31,7 +31,7 @@ type User struct {
 	// notification worker is allowed to fire reminders to this user. Stored
 	// as a string for simplicity — only the worker parses it. Interpreted in
 	// the user's Timezone above.
-	NotificationTime string    `gorm:"default:'10:00';size:5;not null" json:"notification_time"`
+	NotificationTime string         `gorm:"default:'10:00';size:5;not null" json:"notification_time"`
 	IsActive         bool           `gorm:"default:true;not null" json:"is_active"`
 	IsBanned         bool           `gorm:"default:false;not null" json:"is_banned"`
 	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`
@@ -51,13 +51,13 @@ type Subscription struct {
 	// the DB layer — the explicit handler.DeleteMe still runs the same
 	// cleanup in a transaction, this is defence in depth against direct
 	// SQL writes / future admin scripts.
-	User User `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE" json:"-"`
-	Name          string     `gorm:"not null;size:100" json:"name"`
-	Brand         string     `gorm:"default:default;size:32" json:"brand"`
-	Tag           string     `gorm:"size:64" json:"tag,omitempty"`
+	User  User   `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE" json:"-"`
+	Name  string `gorm:"not null;size:100" json:"name"`
+	Brand string `gorm:"default:default;size:32" json:"brand"`
+	Tag   string `gorm:"size:64" json:"tag,omitempty"`
 	// Note is a freeform user-supplied tag to distinguish duplicate
 	// subscriptions ("Netflix — parents", "Netflix — work"). Optional.
-	Note          string     `gorm:"size:128" json:"note,omitempty"`
+	Note string `gorm:"size:128" json:"note,omitempty"`
 	// IconName / IconColor are only meaningful for custom subscriptions
 	// (Brand == "default"). The frontend's icon registry maps the string
 	// name to a lucide-react icon component; unknown names fall back to
@@ -79,14 +79,14 @@ type Subscription struct {
 
 // SharedRoom represents a group subscription room.
 type SharedRoom struct {
-	ID             uuid.UUID     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	Name           string        `gorm:"not null;size:50" json:"name"`
-	OwnerID        uint          `gorm:"index;not null" json:"owner_id"`
-	InviteCode     string        `gorm:"uniqueIndex;size:16" json:"invite_code"`
-	Currency       string        `gorm:"default:USD;size:3" json:"currency"`
-	BillingDay     int           `gorm:"default:1" json:"billing_day"`
-	LastRemindedAt *time.Time    `json:"last_reminded_at,omitempty"`
-	CreatedAt      time.Time     `json:"created_at"`
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	Name           string     `gorm:"not null;size:50" json:"name"`
+	OwnerID        uint       `gorm:"index;not null" json:"owner_id"`
+	InviteCode     string     `gorm:"uniqueIndex;size:16" json:"invite_code"`
+	Currency       string     `gorm:"default:USD;size:3" json:"currency"`
+	BillingDay     int        `gorm:"default:1" json:"billing_day"`
+	LastRemindedAt *time.Time `json:"last_reminded_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 	// CASCADE so DELETE FROM shared_rooms cleans up children at DB layer.
 	// handler.DeleteRoom still wraps the manual deletes in a transaction;
 	// this is defence in depth against direct SQL writes.
@@ -166,9 +166,9 @@ type AppSettings struct {
 	ChannelGateEnabled     bool   `gorm:"default:false" json:"channel_gate_enabled"`
 	TargetChannel          string `gorm:"size:64" json:"target_channel"`
 	// Paywall (grandfathering) — soft limits for free-tier users.
-	PaywallEnabled         bool   `gorm:"default:false" json:"paywall_enabled"`
-	FreeSubsLimit          int    `gorm:"default:6" json:"free_subs_limit"`
-	FreeRoomLimit          int    `gorm:"default:1" json:"free_room_limit"`
+	PaywallEnabled bool `gorm:"default:false" json:"paywall_enabled"`
+	FreeSubsLimit  int  `gorm:"default:6" json:"free_subs_limit"`
+	FreeRoomLimit  int  `gorm:"default:1" json:"free_room_limit"`
 	// Emergency kill-switches, toggled from the in-bot admin panel.
 	//   MaintenanceMode — when true the maintenance middleware answers
 	//     every non-admin /api request with 503; the mini-app shows a
@@ -176,20 +176,12 @@ type AppSettings struct {
 	//   PauseNotifications — when true the notification worker skips its
 	//     send tick entirely (reminders not sent, not marked — so they
 	//     fire normally once the switch is flipped back off).
-	MaintenanceMode        bool   `gorm:"default:false;not null" json:"maintenance_mode"`
-	PauseNotifications     bool   `gorm:"default:false;not null" json:"pause_notifications"`
-	// Premium pricing, split by user locale. Stars prices are whole
-	// Telegram Stars; crypto prices are whole USD. The mini-app reads
-	// these from GET /api/v1/config and shows the locale-matched price
-	// in the PremiumSheet; the bot admin panel edits them in ±50 (Stars)
-	// / ±1 (crypto) steps.
-	PriceStarsRU     int `gorm:"default:50;not null" json:"price_stars_ru"`
-	PriceStarsEN     int `gorm:"default:100;not null" json:"price_stars_en"`
-	PriceCryptoUsdRU int `gorm:"default:1;not null" json:"price_crypto_usd_ru"`
-	PriceCryptoUsdEN int `gorm:"default:2;not null" json:"price_crypto_usd_en"`
-	// Plan-split Premium pricing — Month vs Lifetime. Supersedes the
-	// flat Price* fields above for the two-tier paywall. Stars stay
+	MaintenanceMode    bool `gorm:"default:false;not null" json:"maintenance_mode"`
+	PauseNotifications bool `gorm:"default:false;not null" json:"pause_notifications"`
+	// Plan-split Premium pricing — Month vs Lifetime. Stars are
 	// locale-split (RU/EN); crypto is a single USD amount per plan.
+	// The mini-app reads these from GET /api/v1/config; the bot admin
+	// panel edits them in ±10 (Stars) / ±1 (crypto) steps.
 	PriceStarsMonthRU      int `gorm:"default:75;not null" json:"price_stars_month_ru"`
 	PriceStarsLifetimeRU   int `gorm:"default:500;not null" json:"price_stars_lifetime_ru"`
 	PriceStarsMonthEN      int `gorm:"default:150;not null" json:"price_stars_month_en"`
@@ -206,12 +198,12 @@ type AppSettings struct {
 // without this guard we'd create duplicate rows and spam the user with
 // repeated "thank you" messages.
 type Donation struct {
-	ID                       uint      `gorm:"primaryKey" json:"id"`
-	UserID                   uint      `gorm:"index;not null" json:"user_id"`
-	TelegramID               int64     `json:"telegram_id"`
-	TelegramPaymentChargeID  string    `gorm:"uniqueIndex;size:512;not null" json:"telegram_payment_charge_id"`
-	Amount                   int       `json:"amount"` // in Telegram Stars
-	CreatedAt                time.Time `json:"created_at"`
+	ID                      uint      `gorm:"primaryKey" json:"id"`
+	UserID                  uint      `gorm:"index;not null" json:"user_id"`
+	TelegramID              int64     `json:"telegram_id"`
+	TelegramPaymentChargeID string    `gorm:"uniqueIndex;size:512;not null" json:"telegram_payment_charge_id"`
+	Amount                  int       `json:"amount"` // in Telegram Stars
+	CreatedAt               time.Time `json:"created_at"`
 }
 
 // SponsoredOffer is an admin-created promotional card displayed in the
