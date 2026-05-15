@@ -31,6 +31,7 @@ import {
   AnalyticsSkeleton,
   SettingsSkeleton,
 } from "./Skeletons";
+import { useShallow } from "zustand/react/shallow";
 import { useSubscriptionStore } from "@/stores/subscriptionStore";
 import { useRoomStore } from "@/stores/roomStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -41,32 +42,49 @@ interface Props {
 }
 
 export function Dashboard({ user }: Props) {
-  // Granular Zustand selectors so unrelated store updates (e.g. activeDetail
-  // changing) don't re-render the dashboard.
+  // Selector strategy (audit F4): primitive/array state stays granular —
+  // Object.is short-circuit catches no-op updates for free. Action +
+  // multi-flag clusters that always read together are grouped with
+  // useShallow so a single subscription + one shallow compare replaces
+  // 5-12 separate Zustand listeners per render.
   const settings = useSettingsStore((s) => s.settings);
   const items = useSubscriptionStore((s) => s.items);
   const filter = useSubscriptionStore((s) => s.filter);
-  const setFilter = useSubscriptionStore((s) => s.setFilter);
   const sortBy = useSubscriptionStore((s) => s.sortBy);
   const filterTypes = useSubscriptionStore((s) => s.filterTypes);
   const filterCategories = useSubscriptionStore((s) => s.filterCategories);
-  const deleteSubscription = useSubscriptionStore((s) => s.deleteSubscription);
+  const { setFilter, deleteSubscription } = useSubscriptionStore(
+    useShallow((s) => ({
+      setFilter: s.setFilter,
+      deleteSubscription: s.deleteSubscription,
+    })),
+  );
   const rooms = useRoomStore((s) => s.rooms);
   const fetchRooms = useRoomStore((s) => s.fetchRooms);
 
-  // Global modal state
-  const openRoom = useModalStore((s) => s.openRoom);
-  const closeRoom = useModalStore((s) => s.closeRoom);
-  const activeRoomId = useModalStore((s) => s.activeRoomId);
-  const openCreateRoom = useModalStore((s) => s.openCreateRoom);
-  const closeCreateRoom = useModalStore((s) => s.closeCreateRoom);
-  const createRoomOpen = useModalStore((s) => s.createRoomOpen);
-  const openAddSub = useModalStore((s) => s.openAddSub);
-  const closeAddSub = useModalStore((s) => s.closeAddSub);
-  const addSubOpen = useModalStore((s) => s.addSubOpen);
-  const openFilter = useModalStore((s) => s.openFilter);
-  const closeFilter = useModalStore((s) => s.closeFilter);
-  const filterOpen = useModalStore((s) => s.filterOpen);
+  // Modal store: 12 fields, half flags and half action callbacks. They all
+  // change together (open/close pairs) so shallow compare is a clean fit.
+  const {
+    openRoom, closeRoom, activeRoomId,
+    openCreateRoom, closeCreateRoom, createRoomOpen,
+    openAddSub, closeAddSub, addSubOpen,
+    openFilter, closeFilter, filterOpen,
+  } = useModalStore(
+    useShallow((s) => ({
+      openRoom: s.openRoom,
+      closeRoom: s.closeRoom,
+      activeRoomId: s.activeRoomId,
+      openCreateRoom: s.openCreateRoom,
+      closeCreateRoom: s.closeCreateRoom,
+      createRoomOpen: s.createRoomOpen,
+      openAddSub: s.openAddSub,
+      closeAddSub: s.closeAddSub,
+      addSubOpen: s.addSubOpen,
+      openFilter: s.openFilter,
+      closeFilter: s.closeFilter,
+      filterOpen: s.filterOpen,
+    })),
+  );
 
   const [loading, setLoading] = useState(true);
   const { t } = useTranslation();
