@@ -12,8 +12,10 @@ interface PaywallConfig {
   price_stars_lifetime_ru: number;
   price_stars_month_en: number;
   price_stars_lifetime_en: number;
-  price_crypto_month_usd: number;
-  price_crypto_lifetime_usd: number;
+  price_crypto_month_usd_ru: number;
+  price_crypto_lifetime_usd_ru: number;
+  price_crypto_month_usd_en: number;
+  price_crypto_lifetime_usd_en: number;
 }
 
 interface PaywallStore {
@@ -33,8 +35,10 @@ export const usePaywallStore = create<PaywallStore>((set) => ({
     price_stars_lifetime_ru: 500,
     price_stars_month_en: 150,
     price_stars_lifetime_en: 1000,
-    price_crypto_month_usd: 2,
-    price_crypto_lifetime_usd: 20,
+    price_crypto_month_usd_ru: 1,
+    price_crypto_lifetime_usd_ru: 10,
+    price_crypto_month_usd_en: 2,
+    price_crypto_lifetime_usd_en: 20,
   },
   loaded: false,
 

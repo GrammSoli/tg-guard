@@ -215,13 +215,22 @@ func (h *PaymentHandler) CreateCryptoInvoice(c fiber.Ctx) error {
 		locale = "en"
 	}
 	isRu := strings.HasPrefix(locale, "ru")
+	isMonth := plan == "month"
 
-	// Crypto pricing is a single USD amount per plan (not locale-split).
+	// Crypto pricing is locale-split (RU/EN) × plan, mirroring Stars.
 	var price int
-	if plan == "month" {
-		price = settings.PriceCryptoMonthUSD
+	if isRu {
+		if isMonth {
+			price = settings.PriceCryptoMonthUSDRU
+		} else {
+			price = settings.PriceCryptoLifetimeUSDRU
+		}
 	} else {
-		price = settings.PriceCryptoLifetimeUSD
+		if isMonth {
+			price = settings.PriceCryptoMonthUSDEN
+		} else {
+			price = settings.PriceCryptoLifetimeUSDEN
+		}
 	}
 
 	description := "SubGuard Premium"

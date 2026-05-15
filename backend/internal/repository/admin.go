@@ -203,21 +203,23 @@ func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 	return r.db.Model(&model.AppSettings{}).
 		Where("id = ?", 1).
 		Updates(map[string]interface{}{
-			"cpa_enabled":               s.CPAEnabled,
-			"recommendations_enabled":   s.RecommendationsEnabled,
-			"channel_gate_enabled":      s.ChannelGateEnabled,
-			"target_channel":            s.TargetChannel,
-			"paywall_enabled":           s.PaywallEnabled,
-			"free_subs_limit":           s.FreeSubsLimit,
-			"free_room_limit":           s.FreeRoomLimit,
-			"maintenance_mode":          s.MaintenanceMode,
-			"pause_notifications":       s.PauseNotifications,
-			"price_stars_month_ru":      s.PriceStarsMonthRU,
-			"price_stars_lifetime_ru":   s.PriceStarsLifetimeRU,
-			"price_stars_month_en":      s.PriceStarsMonthEN,
-			"price_stars_lifetime_en":   s.PriceStarsLifetimeEN,
-			"price_crypto_month_usd":    s.PriceCryptoMonthUSD,
-			"price_crypto_lifetime_usd": s.PriceCryptoLifetimeUSD,
+			"cpa_enabled":                  s.CPAEnabled,
+			"recommendations_enabled":      s.RecommendationsEnabled,
+			"channel_gate_enabled":         s.ChannelGateEnabled,
+			"target_channel":               s.TargetChannel,
+			"paywall_enabled":              s.PaywallEnabled,
+			"free_subs_limit":              s.FreeSubsLimit,
+			"free_room_limit":              s.FreeRoomLimit,
+			"maintenance_mode":             s.MaintenanceMode,
+			"pause_notifications":          s.PauseNotifications,
+			"price_stars_month_ru":         s.PriceStarsMonthRU,
+			"price_stars_lifetime_ru":      s.PriceStarsLifetimeRU,
+			"price_stars_month_en":         s.PriceStarsMonthEN,
+			"price_stars_lifetime_en":      s.PriceStarsLifetimeEN,
+			"price_crypto_month_usd_ru":    s.PriceCryptoMonthUSDRU,
+			"price_crypto_lifetime_usd_ru": s.PriceCryptoLifetimeUSDRU,
+			"price_crypto_month_usd_en":    s.PriceCryptoMonthUSDEN,
+			"price_crypto_lifetime_usd_en": s.PriceCryptoLifetimeUSDEN,
 		}).Error
 }
 
