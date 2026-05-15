@@ -46,7 +46,20 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('mergeable:', d['mergeable']\\); print\\('state:', d['mergeStateStatus']\\); print\\('checks:', [\\(c.get\\('name',c.get\\('context','?'\\)\\), c.get\\('conclusion','?'\\), c.get\\('state','?'\\)\\) for c in d.get\\('statusCheckRollup',[]\\)]\\)\")",
       "Bash(python3 -m json.tool)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'PR #{d[\\\\\"number\\\\\"]}: mergeable={d[\\\\\"mergeable\\\\\"]}, state={d[\\\\\"mergeStateStatus\\\\\"]}'\\)\")",
-      "Bash(git pull *)"
+      "Bash(git pull *)",
+      "Bash(sed -n '/func \\(r \\\\*AdminRepo\\) UpdateSettings/,/^}/p' backend/internal/repository/admin.go)",
+      "Bash(sed -n '81,100p' backend/internal/worker/notification.go)",
+      "Bash(GOTOOLCHAIN=local go build ./...)",
+      "Bash(GOTOOLCHAIN=local go vet ./...)",
+      "Bash(GOTOOLCHAIN=local go test ./internal/workerutil/... -short -count=1)",
+      "Bash(python3 -c \"import json; json.load\\(open\\('src/locales/en.json'\\)\\); json.load\\(open\\('src/locales/ru.json'\\)\\); print\\('JSON valid'\\)\")",
+      "Bash(sed -n '/type AppSettings/,/^}/p' backend/internal/model/models.go)",
+      "Bash(sed -n '/func \\(r \\\\*AdminRepo\\) GetSettings/,/^}/p; /func \\(r \\\\*AdminRepo\\) UpdateSettings/,/^}/p' backend/internal/repository/admin.go)",
+      "Bash(sed -n '975,1040p' backend/internal/bot/admin_panel.go)",
+      "Bash(sed -n '255,300p' backend/internal/bot/admin_panel.go)",
+      "Bash(sed -n 940,972p /Users/grammsoli/go/pkg/mod/github.com/go-telegram/bot@v1.13.2/methods_params.go)",
+      "Bash(sed -n 972,985p /Users/grammsoli/go/pkg/mod/github.com/go-telegram/bot@v1.13.2/methods_params.go)",
+      "Bash(sed -n 657,662p /Users/grammsoli/go/pkg/mod/github.com/go-telegram/bot@v1.13.2/models/inline_query.go)"
     ]
   }
 }

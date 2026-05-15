@@ -196,7 +196,7 @@ type Donation struct {
 	ID                       uint      `gorm:"primaryKey" json:"id"`
 	UserID                   uint      `gorm:"index;not null" json:"user_id"`
 	TelegramID               int64     `json:"telegram_id"`
-	TelegramPaymentChargeID  string    `gorm:"uniqueIndex;size:128;not null" json:"telegram_payment_charge_id"`
+	TelegramPaymentChargeID  string    `gorm:"uniqueIndex;size:512;not null" json:"telegram_payment_charge_id"`
 	Amount                   int       `json:"amount"` // in Telegram Stars
 	CreatedAt                time.Time `json:"created_at"`
 }
