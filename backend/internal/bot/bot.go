@@ -130,8 +130,18 @@ func Setup(
 			panel.handleCancel(ctx, b, update)
 		},
 	)
-	// All admin_ callbacks routed through the panel
+	// All admin_ callbacks routed through the panel.
 	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, "admin_", tgbot.MatchTypePrefix,
+		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
+			panel.handleCallback(ctx, b, update)
+		},
+	)
+	// Pricing-menu callbacks use the short "pr_" prefix (pr_st_*, pr_cr_*)
+	// — they are NOT admin_-prefixed, so they need their own registration
+	// or the dispatcher never delivers them to handleCallback and the
+	// button spins forever. Same panel.handleCallback target; its
+	// internal switch already routes "pr_" to handlePriceCallback.
+	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, "pr_", tgbot.MatchTypePrefix,
 		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
 			panel.handleCallback(ctx, b, update)
 		},
