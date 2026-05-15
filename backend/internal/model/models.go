@@ -86,7 +86,14 @@ type SharedRoom struct {
 	Currency       string     `gorm:"default:USD;size:3" json:"currency"`
 	BillingDay     int        `gorm:"default:1" json:"billing_day"`
 	LastRemindedAt *time.Time `json:"last_reminded_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	// LastBillingResetAt is the idempotency guard used by the billing-reset
+	// worker. The worker only resets a room when this is NULL or strictly
+	// older than the start of the current UTC day — that way a second
+	// tick within the 00:00–01:00 window (e.g. after a mid-window server
+	// restart) is a no-op instead of clobbering payments members made in
+	// the interim. Not exposed in JSON; purely worker bookkeeping.
+	LastBillingResetAt *time.Time `json:"-"`
+	CreatedAt          time.Time  `json:"created_at"`
 	// CASCADE so DELETE FROM shared_rooms cleans up children at DB layer.
 	// handler.DeleteRoom still wraps the manual deletes in a transaction;
 	// this is defence in depth against direct SQL writes.
@@ -182,14 +189,26 @@ type AppSettings struct {
 	// locale-split (RU/EN); crypto is a single USD amount per plan.
 	// The mini-app reads these from GET /api/v1/config; the bot admin
 	// panel edits them in ±10 (Stars) / ±1 (crypto) steps.
-	PriceStarsMonthRU        int `gorm:"default:75;not null" json:"price_stars_month_ru"`
-	PriceStarsLifetimeRU     int `gorm:"default:500;not null" json:"price_stars_lifetime_ru"`
-	PriceStarsMonthEN        int `gorm:"default:150;not null" json:"price_stars_month_en"`
-	PriceStarsLifetimeEN     int `gorm:"default:1000;not null" json:"price_stars_lifetime_en"`
-	PriceCryptoMonthUSDRU    int `gorm:"default:1;not null" json:"price_crypto_month_usd_ru"`
-	PriceCryptoLifetimeUSDRU int `gorm:"default:10;not null" json:"price_crypto_lifetime_usd_ru"`
-	PriceCryptoMonthUSDEN    int `gorm:"default:2;not null" json:"price_crypto_month_usd_en"`
-	PriceCryptoLifetimeUSDEN int `gorm:"default:20;not null" json:"price_crypto_lifetime_usd_en"`
+	// Stars-locale price columns: GORM's default Namer happens to produce
+	// the right snake_case (trailing two-letter `RU`/`EN` get a clean
+	// underscore split). They worked by coincidence; making them explicit
+	// here keeps future renames safe and the model self-documenting.
+	PriceStarsMonthRU    int `gorm:"column:price_stars_month_ru;default:75;not null" json:"price_stars_month_ru"`
+	PriceStarsLifetimeRU int `gorm:"column:price_stars_lifetime_ru;default:500;not null" json:"price_stars_lifetime_ru"`
+	PriceStarsMonthEN    int `gorm:"column:price_stars_month_en;default:150;not null" json:"price_stars_month_en"`
+	PriceStarsLifetimeEN int `gorm:"column:price_stars_lifetime_en;default:1000;not null" json:"price_stars_lifetime_en"`
+	// Crypto USD price columns: GORM's Namer flattens trailing `USDRU` /
+	// `USDEN` to `usdru` / `usden` (no underscore between contiguous
+	// uppercase blocks), but the ad-hoc migration in main.go creates the
+	// columns as `..._usd_ru` / `..._usd_en` — a mismatch that left
+	// orphan columns on prod where the SELECT path read 0s and the
+	// admin-UI UPDATE landed on a different column nobody read back.
+	// Explicit `column:` tags force GORM to use the migration-aligned
+	// names on both read and write. Audit #11 root-cause.
+	PriceCryptoMonthUSDRU    int `gorm:"column:price_crypto_month_usd_ru;default:1;not null" json:"price_crypto_month_usd_ru"`
+	PriceCryptoLifetimeUSDRU int `gorm:"column:price_crypto_lifetime_usd_ru;default:10;not null" json:"price_crypto_lifetime_usd_ru"`
+	PriceCryptoMonthUSDEN    int `gorm:"column:price_crypto_month_usd_en;default:2;not null" json:"price_crypto_month_usd_en"`
+	PriceCryptoLifetimeUSDEN int `gorm:"column:price_crypto_lifetime_usd_en;default:20;not null" json:"price_crypto_lifetime_usd_en"`
 }
 
 // Donation logs a successful Telegram Stars payment.

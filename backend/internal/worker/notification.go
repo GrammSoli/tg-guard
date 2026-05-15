@@ -60,6 +60,34 @@ const notificationTickInterval = 30 * time.Minute
 // per renewal date even if the worker scans every 30 minutes.
 const notificationDedupWindow = 20 * time.Hour
 
+// userTzPref caches the per-user values that shouldSendNow reads on
+// every subscription check — IANA timezone resolution + parsed
+// preferred-time minutes. A single tick can iterate many subscriptions
+// belonging to the same user; without this cache shouldSendNow re-runs
+// time.LoadLocation (zoneinfo file read) and re-parses NotificationTime
+// once per subscription. The cache is created fresh in check() so it
+// can't grow unboundedly across ticks.
+type userTzPref struct {
+	loc     *time.Location
+	prefMin int // minutes from local midnight; never negative once cached
+}
+
+// defaultNotifyMinutes is the fallback "10:00" preference, pre-parsed.
+// Used when a stored NotificationTime fails isValidHHMM (legacy rows /
+// hand-edited DB rows). Matches the default the PATCH /me handler
+// writes via notificationTimePattern.
+const defaultNotifyMinutes = 10 * 60
+
+// parseHHMMToMinutes turns an "HH:MM" string into minutes from midnight.
+// Assumes the caller has already validated the format via isValidHHMM —
+// no allocation, branch-free arithmetic on the four digit bytes.
+func parseHHMMToMinutes(s string) int {
+	return int(s[0]-'0')*600 +
+		int(s[1]-'0')*60 +
+		int(s[3]-'0')*10 +
+		int(s[4]-'0')
+}
+
 // Callback prefixes imported from tgutil — shared with bot package.
 
 // Start launches the notification check loop every 30 minutes.
@@ -117,6 +145,11 @@ func (w *NotificationWorker) check(ctx context.Context) {
 	sentIDs := make([]uuid.UUID, 0, notificationBatchSize)
 	var seen, sentCount int
 
+	// Per-tick cache of (timezone, preferred-time) for each user. Shared
+	// across batches because the same user can have multiple subs that
+	// land in different FindInBatches pages. Cleared when check() returns.
+	tzCache := make(map[uint]userTzPref)
+
 	dest := &[]model.Subscription{}
 	err := w.db.WithContext(ctx).
 		Preload("User", func(db *gorm.DB) *gorm.DB {
@@ -139,7 +172,7 @@ func (w *NotificationWorker) check(ctx context.Context) {
 				default:
 				}
 				sub := &(*batchSubs)[i]
-				if w.tryProcessOne(ctx, sub, now) {
+				if w.tryProcessOne(ctx, sub, now, tzCache) {
 					sentIDs = append(sentIDs, sub.ID)
 					sentCount++
 				}
@@ -180,7 +213,10 @@ func (w *NotificationWorker) check(ctx context.Context) {
 // tryProcessOne is the per-subscription gate + send loop. Returns true iff
 // the reminder was delivered (so the caller should mark notified_at).
 // All skip reasons are logged inside the helper or shouldSendNow.
-func (w *NotificationWorker) tryProcessOne(ctx context.Context, sub *model.Subscription, now time.Time) bool {
+//
+// tzCache is the per-tick cache shared with check() — populated lazily
+// inside shouldSendNow on the first sub belonging to each user.
+func (w *NotificationWorker) tryProcessOne(ctx context.Context, sub *model.Subscription, now time.Time, tzCache map[uint]userTzPref) bool {
 	userLabel := fmt.Sprintf("user %d (@%s)", sub.User.TelegramID, sub.User.Username)
 
 	if sub.User.TelegramID == 0 {
@@ -195,7 +231,7 @@ func (w *NotificationWorker) tryProcessOne(ctx context.Context, sub *model.Subsc
 		log.Printf("[notification-worker] skip %s sub %q: user is banned", userLabel, sub.Name)
 		return false
 	}
-	if !shouldSendNow(sub, &sub.User, now) {
+	if !shouldSendNow(sub, &sub.User, now, tzCache) {
 		return false // reason already logged inside shouldSendNow
 	}
 
@@ -250,8 +286,11 @@ func (w *NotificationWorker) sendWithRetry(
 // shouldSendNow decides whether a candidate subscription deserves a
 // reminder right now. Three gates, evaluated in the user's own timezone:
 //
-//  1. The user's preferred HH:MM has already passed today (string compare
-//     on zero-padded "15:04" — works because both values are HH:MM 24h).
+//  1. The user's preferred HH:MM has already passed today. Compared as
+//     minutes-from-midnight (not lexical string compare!) so the day
+//     boundary works correctly — a previous bug had "00:10" < "23:30"
+//     evaluate true, blocking reminders for users whose preferred time
+//     was late-evening once midnight rolled over.
 //  2. The next payment falls on "tomorrow" relative to the user's
 //     localNow.AddDate(0, 0, 1) — covers users whose UTC day boundary
 //     doesn't match the server's.
@@ -261,37 +300,47 @@ func (w *NotificationWorker) sendWithRetry(
 //     writer (e.g. callback handler).
 //
 // All three must hold. Time-of-day failure means "too early today" —
-// we'll catch it on a later tick. Tomorrow-mismatch means the row is in
-// the candidate window but its local date doesn't actually land tomorrow
-// for this particular user.
-func shouldSendNow(sub *model.Subscription, u *model.User, now time.Time) bool {
+// we'll catch it on a later tick AND the next-day gate will then reject
+// the same row, so a "preferred=23:30 + tick=23:00" sub correctly fires
+// at the 23:30 tick and then gets dedup-blocked by notified_at.
+//
+// tzCache is shared across the whole tick — first call for each user
+// pays the LoadLocation + HH:MM parse cost, the rest of the user's
+// subscriptions reuse the cached pair.
+func shouldSendNow(sub *model.Subscription, u *model.User, now time.Time, tzCache map[uint]userTzPref) bool {
 	userLabel := fmt.Sprintf("user %d (@%s)", u.TelegramID, u.Username)
 
-	loc, err := time.LoadLocation(u.Timezone)
-	if err != nil || loc == nil {
-		loc = time.UTC
+	pref, cached := tzCache[u.ID]
+	if !cached {
+		loc, err := time.LoadLocation(u.Timezone)
+		if err != nil || loc == nil {
+			loc = time.UTC
+		}
+		prefMin := defaultNotifyMinutes
+		if isValidHHMM(u.NotificationTime) {
+			prefMin = parseHHMMToMinutes(u.NotificationTime)
+		}
+		pref = userTzPref{loc: loc, prefMin: prefMin}
+		tzCache[u.ID] = pref
 	}
-	localNow := now.In(loc)
 
-	preferredHHMM := u.NotificationTime
-	if !isValidHHMM(preferredHHMM) {
-		preferredHHMM = "10:00"
-	}
+	localNow := now.In(pref.loc)
+	nowMin := localNow.Hour()*60 + localNow.Minute()
 
-	log.Printf("[notification-worker] checking %s sub %q: local_time=%s, preferred=%s, next_payment=%s",
+	log.Printf("[notification-worker] checking %s sub %q: local_time=%s, preferred_min=%d, next_payment=%s",
 		userLabel, sub.Name,
 		localNow.Format("2006-01-02 15:04"),
-		preferredHHMM,
-		sub.NextPaymentAt.In(loc).Format("2006-01-02 15:04"),
+		pref.prefMin,
+		sub.NextPaymentAt.In(pref.loc).Format("2006-01-02 15:04"),
 	)
 
-	if localNow.Format("15:04") < preferredHHMM {
-		log.Printf("[notification-worker] skip %s sub %q: too early (now %s < preferred %s)",
-			userLabel, sub.Name, localNow.Format("15:04"), preferredHHMM)
+	if nowMin < pref.prefMin {
+		log.Printf("[notification-worker] skip %s sub %q: too early (now %dm < preferred %dm)",
+			userLabel, sub.Name, nowMin, pref.prefMin)
 		return false
 	}
 
-	next := sub.NextPaymentAt.In(loc)
+	next := sub.NextPaymentAt.In(pref.loc)
 	tomorrow := localNow.AddDate(0, 0, 1)
 	if next.Year() != tomorrow.Year() ||
 		next.Month() != tomorrow.Month() ||

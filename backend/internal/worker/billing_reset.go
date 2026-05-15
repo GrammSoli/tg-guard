@@ -44,12 +44,29 @@ func (w *BillingResetWorker) Start(ctx context.Context) {
 // check accepts ctx so its DB queries respect graceful shutdown. Without
 // WithContext the queries would continue against a potentially-closing
 // connection pool and raise "database is closed" errors mid-tick.
+//
+// Idempotency: rooms.last_billing_reset_at is the per-room "we already
+// reset today" stamp. The eligibility query filters on it (NULL or
+// strictly older than today's UTC midnight), and each successful reset
+// transactionally writes it. A second tick within the same UTC day —
+// whether from a server restart in the 00:00–01:00 window or from the
+// hour-gate being relaxed in the future — picks up zero rows and is a
+// silent no-op. Replaces the previous "emergent" idempotency that relied
+// on the WHERE has_paid=true clause finding nothing on the second pass:
+// that protection broke as soon as any member re-paid between the two
+// ticks.
 func (w *BillingResetWorker) check(ctx context.Context) {
 	now := time.Now().UTC()
 	today := now.Day()
 	daysInMonth := time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
-	// Only run the reset between 00:00–01:00 UTC to avoid duplicate resets
+	// Cheap optimisation: only scan in the 00:00–01:00 UTC window. The
+	// column-based guard below is the real safety net; this just spares
+	// the DB a query 22 times a day. If a deploy goes late and the
+	// worker first ticks at 03:00, we'll miss today — accept that as the
+	// existing contract, since loosening it would change reset timing
+	// semantics that downstream UX (calendar view, reminders) depends on.
 	if now.Hour() > 1 {
 		return
 	}
@@ -60,9 +77,12 @@ func (w *BillingResetWorker) check(ctx context.Context) {
 	// skip February (28/29 days), April (30), June (30), September (30),
 	// November (30).
 	var rooms []model.SharedRoom
-	q := w.db.WithContext(ctx).Where("billing_day = ?", today)
+	q := w.db.WithContext(ctx).
+		Where("last_billing_reset_at IS NULL OR last_billing_reset_at < ?", todayStart)
 	if today == daysInMonth {
-		q = w.db.WithContext(ctx).Where("billing_day = ? OR billing_day > ?", today, daysInMonth)
+		q = q.Where("billing_day = ? OR billing_day > ?", today, daysInMonth)
+	} else {
+		q = q.Where("billing_day = ?", today)
 	}
 	err := q.Find(&rooms).Error
 	if err != nil {
@@ -84,16 +104,32 @@ func (w *BillingResetWorker) check(ctx context.Context) {
 			return
 		default:
 		}
-		result := w.db.WithContext(ctx).Model(&model.RoomMember{}).
-			Where("room_id = ? AND has_paid = true", room.ID).
-			Updates(map[string]interface{}{"has_paid": false, "paid_at": nil})
-		if result.Error != nil {
-			log.Printf("[billing-reset] error resetting room %s: %v", room.ID, result.Error)
-			observability.CaptureException(result.Error)
+
+		// Atomic reset + stamp. If either fails the whole pair rolls
+		// back so the room remains "not reset today" for the next tick.
+		txErr := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			result := tx.Model(&model.RoomMember{}).
+				Where("room_id = ? AND has_paid = true", room.ID).
+				Updates(map[string]interface{}{"has_paid": false, "paid_at": nil})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected > 0 {
+				log.Printf("[billing-reset] reset %d members for room %q (ID: %s)",
+					result.RowsAffected, room.Name, room.ID)
+			}
+			return tx.Model(&model.SharedRoom{}).
+				Where("id = ?", room.ID).
+				Update("last_billing_reset_at", now).Error
+		})
+		if txErr != nil {
+			log.Printf("[billing-reset] error processing room %s: %v", room.ID, txErr)
+			// Surface to Sentry — silent DB-write failures here mean
+			// members stay reset / unreset incorrectly, which is hard
+			// to spot without log mining (audit observability hook
+			// from PR #86).
+			observability.CaptureException(txErr)
 			continue
-		}
-		if result.RowsAffected > 0 {
-			log.Printf("[billing-reset] reset %d members for room %q (ID: %s)", result.RowsAffected, room.Name, room.ID)
 		}
 	}
 }

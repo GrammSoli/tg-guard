@@ -299,13 +299,12 @@ func (bh *broadcastHandler) copyOne(parent context.Context, b *tgbot.Bot, fromCh
 			return true
 		}
 
-		errLower := strings.ToLower(err.Error())
-
-		// Permanent failures — skip this user, don't retry.
-		if strings.Contains(errLower, "blocked") ||
-			strings.Contains(errLower, "forbidden") ||
-			strings.Contains(errLower, "deactivated") ||
-			strings.Contains(errLower, "not found") {
+		// Permanent per-recipient failures — skip this user, don't retry.
+		// Matched against an explicit phrase list (workerutil) so a
+		// transient global 403 (token rotation, edge proxy) is NOT
+		// mistaken for a per-user block, which would skip the entire
+		// remaining batch. See audit #9.
+		if workerutil.IsPermanentSendFailure(err) {
 			log.Printf("[broadcast] skip chat %d: %v", toChatID, err)
 			return false
 		}

@@ -24,6 +24,14 @@ import (
 	"github.com/subguard/backend/internal/model"
 )
 
+// cryptoPayClient is a dedicated HTTP client for outbound Crypto Pay API
+// calls. http.DefaultClient has NO timeout, so a hung Crypto Pay endpoint
+// would tie up the Fiber handler goroutine until the user's WebView gave
+// up — the fiber request context bound via NewRequestWithContext only
+// cancels when the client itself disconnects. A hard 15s ceiling keeps
+// per-request latency bounded regardless of upstream behaviour.
+var cryptoPayClient = &http.Client{Timeout: 15 * time.Second}
+
 // PaymentHandler handles Premium payment endpoints (Stars + Crypto Pay).
 type PaymentHandler struct {
 	cfg *config.Config
@@ -263,7 +271,7 @@ func (h *PaymentHandler) CreateCryptoInvoice(c fiber.Ctx) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Crypto-Pay-API-Token", h.cfg.CryptoPayToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := cryptoPayClient.Do(req)
 	if err != nil {
 		log.Printf("[payment.crypto] API call error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "crypto api unavailable"})
@@ -317,13 +325,17 @@ func (h *PaymentHandler) HandleCryptoWebhook(c fiber.Ctx) error {
 	rawBody := c.Body()
 	signature := c.Get("crypto-pay-api-signature")
 
-	// Signature: HMAC-SHA256(SHA256(token), body)
+	// Signature: HMAC-SHA256(SHA256(token), body). Crypto Pay sends it as a
+	// lower-case hex string. We decode to raw bytes BEFORE comparing so
+	// hmac.Equal runs on equal-length inputs (32 bytes from SHA-256) and
+	// stays constant-time; comparing hex strings of varying length leaks
+	// the length of the supplied signature on a mismatch.
 	tokenHash := sha256.Sum256([]byte(h.cfg.CryptoPayToken))
 	mac := hmac.New(sha256.New, tokenHash[:])
 	mac.Write(rawBody)
-	expectedSig := hex.EncodeToString(mac.Sum(nil))
 
-	if !hmac.Equal([]byte(signature), []byte(expectedSig)) {
+	sigBytes, decodeErr := hex.DecodeString(signature)
+	if decodeErr != nil || !hmac.Equal(sigBytes, mac.Sum(nil)) {
 		log.Printf("❌ [crypto/webhook] Invalid signature. Got=%q", signature)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid signature"})
 	}

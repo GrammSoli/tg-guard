@@ -15,6 +15,7 @@ import (
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/notifier"
 	"github.com/subguard/backend/internal/repository"
+	"github.com/subguard/backend/internal/tgutil"
 )
 
 type RoomHandler struct {
@@ -213,8 +214,15 @@ func (h *RoomHandler) Remind(c fiber.Ctx) error {
 	}
 	sendCtx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
 	defer cancel()
+	// Escape the user-supplied room name — notifier sends with ParseMode
+	// "Markdown" (legacy). Without this, a room called e.g. "*test*"
+	// blows up Telegram's parser ("can't parse entities") and the reminder
+	// silently never goes out; worse, "[link](http://attacker)" would
+	// render as a clickable link inside a system-looking notification.
+	// Escape ONCE here, not per-recipient, since the name is the same.
+	escapedName := tgutil.EscapeMarkdown(room.Name)
 	for _, tgID := range tgIDs {
-		text := fmt.Sprintf("🔔 Напоминание: оплатите вашу долю в комнате «%s».", room.Name)
+		text := fmt.Sprintf("🔔 Напоминание: оплатите вашу долю в комнате «%s».", escapedName)
 		if err := h.notifier.SendMessage(sendCtx, tgID, text); err != nil {
 			log.Printf("[remind] failed to send to %d: %v", tgID, err)
 		}

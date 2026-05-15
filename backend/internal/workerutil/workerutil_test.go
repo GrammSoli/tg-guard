@@ -91,3 +91,38 @@ func TestIsRateLimit(t *testing.T) {
 		t.Fatal("expected false for nil")
 	}
 }
+
+func TestIsPermanentSendFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		// True positives — these phrases ARE in the Telegram Bot API
+		// error stream and DO mean "give up on this recipient".
+		{"blocked by user", errors.New("Forbidden: bot was blocked by the user"), true},
+		{"deactivated", errors.New("Forbidden: user is deactivated"), true},
+		{"chat not found", errors.New("Bad Request: chat not found"), true},
+		{"never started", errors.New("Forbidden: bot can't initiate conversation with a user"), true},
+		{"kicked from group", errors.New("Forbidden: bot was kicked from the supergroup chat"), true},
+		{"write forbidden", errors.New("Bad Request: CHAT_WRITE_FORBIDDEN"), true},
+		{"case-insensitive", errors.New("FORBIDDEN: BOT WAS BLOCKED BY THE USER"), true},
+
+		// True negatives — DON'T skip the recipient on these.
+		// This is the regression we're guarding: a bare "forbidden"
+		// from a transient global issue (token rotation, edge proxy)
+		// must NOT be treated as a per-user permanent failure.
+		{"bare forbidden", errors.New("403 Forbidden"), false},
+		{"rate limit", errors.New("Too Many Requests: retry after 5"), false},
+		{"network", errors.New("connection refused"), false},
+		{"timeout", errors.New("context deadline exceeded"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsPermanentSendFailure(tc.err); got != tc.want {
+				t.Fatalf("IsPermanentSendFailure(%v) = %v; want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}

@@ -85,48 +85,60 @@ func main() {
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(15 * time.Minute)
 
-	// Always ensure recently-added columns exist. This is safe to run
-	// repeatedly thanks to IF NOT EXISTS. Required because RUN_MIGRATIONS
-	// is off in production and AutoMigrate won't run.
+	// Always ensure recently-added columns exist. Safe to run repeatedly
+	// thanks to IF NOT EXISTS. Required because RUN_MIGRATIONS is off in
+	// production and AutoMigrate won't run.
+	//
+	// Each statement is logged on failure (previously `_, _ = sqlDB.Exec`
+	// silently swallowed everything, including legitimate breakage like
+	// permission denied or syntax error after a refactor — operators
+	// had no signal). IF NOT EXISTS makes legitimate re-runs no-ops, so
+	// real errors are signal, not noise.
 	if sqlDB, err := db.DB(); err == nil {
-		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`)
-		_, _ = sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users (deleted_at)`)
-		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT false`)
-		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`)
-		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS traffic_source_id VARCHAR(64) DEFAULT ''`)
+		runMigration := func(label, query string) {
+			if _, execErr := sqlDB.Exec(query); execErr != nil {
+				log.Printf("[migration] %s failed: %v", label, execErr)
+			}
+		}
+		runMigration("users.deleted_at", `ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`)
+		runMigration("idx_users_deleted_at", `CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users (deleted_at)`)
+		runMigration("users.is_banned", `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT false`)
+		runMigration("users.is_active", `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`)
+		runMigration("users.traffic_source_id", `ALTER TABLE users ADD COLUMN IF NOT EXISTS traffic_source_id VARCHAR(64) DEFAULT ''`)
 		// Paywall columns on app_settings
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS paywall_enabled BOOLEAN NOT NULL DEFAULT false`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_subs_limit INTEGER NOT NULL DEFAULT 6`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_room_limit INTEGER NOT NULL DEFAULT 1`)
+		runMigration("app_settings.paywall_enabled", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS paywall_enabled BOOLEAN NOT NULL DEFAULT false`)
+		runMigration("app_settings.free_subs_limit", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_subs_limit INTEGER NOT NULL DEFAULT 6`)
+		runMigration("app_settings.free_room_limit", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_room_limit INTEGER NOT NULL DEFAULT 1`)
 		// Emergency kill-switch columns on app_settings
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN NOT NULL DEFAULT false`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS pause_notifications BOOLEAN NOT NULL DEFAULT false`)
+		runMigration("app_settings.maintenance_mode", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN NOT NULL DEFAULT false`)
+		runMigration("app_settings.pause_notifications", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS pause_notifications BOOLEAN NOT NULL DEFAULT false`)
 		// Plan-split (Month / Lifetime) pricing + premium expiry
-		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_expires_at TIMESTAMPTZ`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_month_ru INTEGER NOT NULL DEFAULT 75`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_lifetime_ru INTEGER NOT NULL DEFAULT 500`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_month_en INTEGER NOT NULL DEFAULT 150`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_lifetime_en INTEGER NOT NULL DEFAULT 1000`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_month_usd_ru INTEGER NOT NULL DEFAULT 1`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_lifetime_usd_ru INTEGER NOT NULL DEFAULT 10`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_month_usd_en INTEGER NOT NULL DEFAULT 2`)
-		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_lifetime_usd_en INTEGER NOT NULL DEFAULT 20`)
-		// Backfill the crypto RU/EN price columns on the existing
-		// singleton AppSettings row. ADD COLUMN ... DEFAULT only
-		// backfills rows present at ALTER time on some setups; if the
-		// row was created/migrated by a path that left them at 0, this
-		// repairs it. Idempotent — the WHERE guard makes it a no-op once
-		// the row holds real values.
-		_, _ = sqlDB.Exec(`UPDATE app_settings SET
-			price_crypto_month_usd_ru = 1,
-			price_crypto_lifetime_usd_ru = 10,
-			price_crypto_month_usd_en = 2,
-			price_crypto_lifetime_usd_en = 20
-			WHERE id = 1 AND price_crypto_month_usd_ru = 0`)
+		runMigration("users.premium_expires_at", `ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_expires_at TIMESTAMPTZ`)
+		runMigration("app_settings.price_stars_month_ru", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_month_ru INTEGER NOT NULL DEFAULT 75`)
+		runMigration("app_settings.price_stars_lifetime_ru", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_lifetime_ru INTEGER NOT NULL DEFAULT 500`)
+		runMigration("app_settings.price_stars_month_en", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_month_en INTEGER NOT NULL DEFAULT 150`)
+		runMigration("app_settings.price_stars_lifetime_en", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_lifetime_en INTEGER NOT NULL DEFAULT 1000`)
+		runMigration("app_settings.price_crypto_month_usd_ru", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_month_usd_ru INTEGER NOT NULL DEFAULT 1`)
+		runMigration("app_settings.price_crypto_lifetime_usd_ru", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_lifetime_usd_ru INTEGER NOT NULL DEFAULT 10`)
+		runMigration("app_settings.price_crypto_month_usd_en", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_month_usd_en INTEGER NOT NULL DEFAULT 2`)
+		runMigration("app_settings.price_crypto_lifetime_usd_en", `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_lifetime_usd_en INTEGER NOT NULL DEFAULT 20`)
 		// Idempotent charge-ID column on donations (Stars webhook dedup)
-		_, _ = sqlDB.Exec(`ALTER TABLE donations ADD COLUMN IF NOT EXISTS telegram_payment_charge_id VARCHAR(512) NOT NULL DEFAULT ''`)
-		_, _ = sqlDB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_donations_charge_id ON donations (telegram_payment_charge_id) WHERE telegram_payment_charge_id != ''`)
-		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id + paywall + kill-switch + donation charge-id columns exist")
+		runMigration("donations.telegram_payment_charge_id", `ALTER TABLE donations ADD COLUMN IF NOT EXISTS telegram_payment_charge_id VARCHAR(512) NOT NULL DEFAULT ''`)
+		runMigration("idx_donations_charge_id", `CREATE UNIQUE INDEX IF NOT EXISTS idx_donations_charge_id ON donations (telegram_payment_charge_id) WHERE telegram_payment_charge_id != ''`)
+		// Idempotency stamp for the billing-reset worker. Existing rooms
+		// get NULL and will be reset on the first eligible tick — that
+		// matches the previous behaviour, no surprise resets.
+		runMigration("shared_rooms.last_billing_reset_at", `ALTER TABLE shared_rooms ADD COLUMN IF NOT EXISTS last_billing_reset_at TIMESTAMPTZ`)
+		// NOTE: a previous destructive UPDATE backfill lived here. It set
+		// `price_crypto_*` to 1/10/2/20 whenever the existing value was 0
+		// — silently overriding a legitimate admin choice of 0 on every
+		// restart. Removed under audit #11 once the root cause of the
+		// admin-UI price bug was fixed (column-name mismatch in
+		// model.AppSettings — see the `gorm:"column:..."` tags there).
+		// The ad-hoc UPDATE is no longer needed: ADD COLUMN ... DEFAULT
+		// already backfills existing rows on PG 11+, and from this
+		// deploy onwards the admin UI is the single source of truth.
+		log.Println("ad-hoc migrations applied")
 	}
 
 	// Auto-migrate only in test/dev. Production should run a dedicated
@@ -231,7 +243,7 @@ func main() {
 	// the whole binary. workerWG lets the shutdown handler wait for all
 	// worker ticks to finish before closing DB / Redis pools.
 
-	currencyWorker := worker.NewCurrencyWorker(rdb)
+	currencyWorker := worker.NewCurrencyWorker(rdb, cfg.CurrencyAPIURL)
 	workerWG.Add(1)
 	go func() {
 		defer workerWG.Done()
@@ -303,7 +315,7 @@ func main() {
 	app.Post("/webhook/crypto", cryptoWebhookH.HandleCryptoWebhook)
 
 	// ── Public catalog (no auth needed) ────────────────
-	adminH := handler.NewAdminHandler(db, cfg, tgBot, ctx)
+	adminH := handler.NewAdminHandler(db, cfg, tgBot, rdb, ctx).WithLifecycle(&workerWG)
 	app.Get("/api/v1/catalog", adminH.ListCatalog)
 
 	// ── Authenticated routes ───────────────────────────
@@ -353,6 +365,13 @@ func main() {
 
 	// Public config (paywall limits — available to all authenticated users)
 	auth.Get("/config", adminH.GetPublicConfig)
+
+	// FX rates — cached USD-base map written by the currency worker.
+	// Read once on app boot by the frontend's fxStore; powers
+	// convertCurrency() everywhere. Auth-gated to keep an unauthenticated
+	// scraper off the endpoint, even though rates aren't sensitive.
+	currencyH := handler.NewCurrencyHandler(rdb)
+	auth.Get("/fx", currencyH.GetRates)
 
 	// Subscriptions
 	subH := handler.NewSubscriptionHandler(db)

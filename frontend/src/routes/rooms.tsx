@@ -7,7 +7,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useModalStore } from "@/stores/modalStore";
 import { usePaywallStore } from "@/stores/paywallStore";
 import { formatCurrency, localeFor } from "@/lib/format";
-import { convertCurrency } from "@/lib/currencyRates";
+import { convertCurrency, useFxRates } from "@/lib/currencyRates";
 import { SwipeableRoomCard } from "@/components/subguard/SwipeableRoomCard";
 import { PremiumSheet } from "@/components/subguard/PremiumSheet";
 import { hapticImpact, hapticNotification } from "@/lib/telegram";
@@ -30,12 +30,22 @@ const SORT_STORAGE_KEY = "rooms.sort";
 function RoomsPage() {
   const { t, i18n } = useTranslation();
   const lc = localeFor(i18n.language);
-  const { rooms, fetchRooms, deleteRoom } = useRoomStore();
-  const { settings } = useSettingsStore();
+  // Granular selectors — was destructuring the whole roomStore /
+  // settingsStore, which subscribed RoomsPage to EVERY field. A
+  // mark-paid in some other room or an unrelated profile sync (e.g.
+  // notification toggle) used to re-render the entire list. Now each
+  // selector only triggers a re-render when its own slice changes.
+  // Audit #18.
+  const rooms = useRoomStore((s) => s.rooms);
+  const fetchRooms = useRoomStore((s) => s.fetchRooms);
+  const deleteRoom = useRoomStore((s) => s.deleteRoom);
+  const userCurrency = useSettingsStore((s) => s.settings.defaultCurrency);
+  const isSubscribed = useSettingsStore((s) => s.settings.isSubscribed);
   const openRoom = useModalStore((s) => s.openRoom);
   const openCreateRoom = useModalStore((s) => s.openCreateRoom);
   const paywallConfig = usePaywallStore((s) => s.config);
-  const userCurrency = settings.defaultCurrency;
+  // Subscribe — re-render the rooms list when live FX rates land.
+  useFxRates();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [premiumOpen, setPremiumOpen] = useState(false);
@@ -92,7 +102,7 @@ function RoomsPage() {
         <button
           onClick={() => {
             hapticImpact("medium");
-            if (paywallConfig.paywall_enabled && !settings.isSubscribed && rooms.length >= paywallConfig.free_room_limit) {
+            if (paywallConfig.paywall_enabled && !isSubscribed && rooms.length >= paywallConfig.free_room_limit) {
               setPremiumOpen(true);
               hapticNotification("warning");
             } else {

@@ -58,7 +58,15 @@ const finalLang = resolveLanguage();
 
 // Eagerly sync with the settings store so components reading
 // locale from Zustand see the correct value before fetchProfile.
-useSettingsStore.getState().settings.locale = finalLang;
+// Use setState (not direct field mutation) — Zustand's invariant is
+// that state objects are immutable, and subscribers are notified only
+// via the setter. A bare `getState().settings.locale = ...` writes
+// the field but skips notification, so any component already mounted
+// with a `(s) => s.settings.locale` selector would never re-render
+// with the new value. Audit #15.
+useSettingsStore.setState((s) => ({
+  settings: { ...s.settings, locale: finalLang },
+}));
 
 i18n.use(initReactI18next).init({
   resources: {

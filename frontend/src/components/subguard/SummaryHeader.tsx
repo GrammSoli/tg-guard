@@ -1,6 +1,6 @@
 import { formatCurrency, localeFor } from "@/lib/format";
 import { useTranslation } from "react-i18next";
-import { convertCurrency } from "@/lib/currencyRates";
+import { convertCurrency, useFxRates } from "@/lib/currencyRates";
 import { ArrowUpRight } from "lucide-react";
 import type { UserSettings } from "@/types/subscription";
 
@@ -22,6 +22,8 @@ export function SummaryHeader({
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const lc = localeFor(locale);
+  // Subscribe — re-render displayTotal when live FX rates land.
+  useFxRates();
   const baseCurrency = settings.defaultCurrency;
   const displayTotal =
     currency !== baseCurrency

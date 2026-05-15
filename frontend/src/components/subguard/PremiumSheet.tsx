@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Crown, Sparkles, Zap } from "lucide-react";
 import {
@@ -46,6 +46,14 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
   const [selectedPlan, setSelectedPlan] = useState<Plan>("lifetime");
   const [loadingStars, setLoadingStars] = useState(false);
   const [loadingCrypto, setLoadingCrypto] = useState(false);
+  // Crypto flow has no synchronous "paid"/"cancelled" callback — the
+  // user leaves the WebView for CryptoBot and we only learn the outcome
+  // via the backend webhook. While `awaitingCryptoReturn` is true, the
+  // sheet stays open and listens for visibility/focus events; on every
+  // return it refreshes /me. As soon as the webhook flips isDonator
+  // server-side, the existing render branch ("already-active state")
+  // takes over without any extra UI plumbing. Audit #17.
+  const [awaitingCryptoReturn, setAwaitingCryptoReturn] = useState(false);
 
   const isRu = i18n.language.startsWith("ru");
   const starsMonth = isRu ? config.price_stars_month_ru : config.price_stars_month_en;
@@ -94,19 +102,71 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
         { method: "POST", body: { plan: selectedPlan } },
       );
       // Open the CryptoBot link inside Telegram. The webhook activates
-      // premium on the backend; the user gets a TG message.
+      // premium on the backend; the user gets a TG message. We DON'T
+      // close the sheet here — keep it open in "waiting" state so the
+      // visibility/focus listeners below can refresh /me when the user
+      // returns from CryptoBot, and the existing isDonator render
+      // branch swaps in the confirmation view automatically.
       openTelegramLink(invoice_url);
       const { toast } = await import("sonner");
       toast.info(t("premium.crypto_processing"));
-      onClose();
+      setAwaitingCryptoReturn(true);
     } catch (err) {
       console.error("[PremiumSheet] crypto error:", err);
       const { toast } = await import("sonner");
       toast.error(t("premium.payment_failed"));
-    } finally {
       setLoadingCrypto(false);
     }
   };
+
+  // While awaiting CryptoBot return, refresh /me on every visibility
+  // or focus event — both fire when the user comes back to the
+  // WebView from another Telegram screen. Belt-and-suspenders: a 5s
+  // one-off timer covers the case where the webhook is still in
+  // flight at the moment the user returns. Cleanup removes every
+  // listener so we don't leak handlers across mount cycles or when
+  // the user gives up and closes the sheet.
+  useEffect(() => {
+    if (!open || !awaitingCryptoReturn) return;
+    const refresh = () => {
+      void fetchProfile();
+    };
+    const onVisibility = () => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", refresh);
+    const fallback = window.setTimeout(refresh, 5000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", refresh);
+      window.clearTimeout(fallback);
+    };
+  }, [open, awaitingCryptoReturn, fetchProfile]);
+
+  // Once the webhook has flipped isDonator on the backend and
+  // fetchProfile lands it in the store, clear the waiting state.
+  // The sheet's top-of-render `if (isDonator)` branch then takes
+  // over and shows the confirmation card. We also clear
+  // loadingCrypto so any future open of this sheet (after the user
+  // closes it) starts in a clean state, not eternally "processing".
+  useEffect(() => {
+    if (awaitingCryptoReturn && isDonator) {
+      setAwaitingCryptoReturn(false);
+      setLoadingCrypto(false);
+    }
+  }, [awaitingCryptoReturn, isDonator]);
+
+  // Reset transient state when the sheet closes. Without this, a user
+  // who tapped Pay-Crypto and then dismissed the sheet via the close
+  // gesture would reopen it later with the buttons still disabled.
+  useEffect(() => {
+    if (!open) {
+      setAwaitingCryptoReturn(false);
+      setLoadingCrypto(false);
+      setLoadingStars(false);
+    }
+  }, [open]);
 
   const loading = loadingStars || loadingCrypto;
 
@@ -216,10 +276,28 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
         </div>
 
         <DrawerFooter className="gap-3">
+          {/* Waiting-for-Crypto banner — replaces the noise of two grey
+              buttons with a clear "we're listening for your payment"
+              status. Using t(key, fallback) so no locale change is
+              required for this rollout; copy can be added to the JSON
+              bundle later for proper translation. */}
+          {awaitingCryptoReturn && (
+            <p
+              role="status"
+              aria-live="polite"
+              className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-center text-xs font-medium text-amber-400"
+            >
+              {t(
+                "premium.cryptoWaiting",
+                "Waiting for your CryptoBot payment — this card will update automatically when it lands.",
+              )}
+            </p>
+          )}
+
           {/* Primary CTA — Telegram Stars. */}
           <button
             onClick={handleStars}
-            disabled={loading}
+            disabled={loading || awaitingCryptoReturn}
             className="w-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-6 py-3 text-sm font-bold text-black shadow-lg transition-transform active:scale-[0.97] disabled:opacity-60"
           >
             {loadingStars
@@ -230,7 +308,7 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
           {/* Secondary — Crypto Pay. */}
           <button
             onClick={handleCrypto}
-            disabled={loading}
+            disabled={loading || awaitingCryptoReturn}
             className="w-full rounded-full border border-input bg-transparent px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-accent active:scale-[0.97] disabled:opacity-60"
           >
             {loadingCrypto

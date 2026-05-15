@@ -132,9 +132,16 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       amount: parseFloat(amount) || 0,
       currency,
       period,
-      next_payment_at: new Date(nextDate).toISOString(),
+      // Send the calendar date as a date-only "yyyy-MM-dd" string so
+      // the backend can anchor it at noon in the user's stored
+      // timezone (audit #14). Previously we did `new Date(nextDate)
+      // .toISOString()` which served the day as UTC-midnight — for
+      // every user west of UTC that resolved to the PREVIOUS calendar
+      // day in their local time, so the notification worker fired
+      // reminders one day early.
+      next_payment_at: nextDate,
       is_trial: isTrial,
-      trial_ends_at: isTrial ? new Date(nextDate).toISOString() : null,
+      trial_ends_at: isTrial ? nextDate : null,
       is_auto_pay: autoPay,
     });
     onOpenChange(false);

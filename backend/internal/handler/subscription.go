@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -11,6 +12,53 @@ import (
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/repository"
 )
+
+// parseUserDate normalises an incoming next_payment_at / trial_ends_at
+// string to a wall-clock anchored at NOON in the user's stored
+// timezone. This is the single source of truth for "what calendar day
+// did the user pick" — the notification worker only needs the day in
+// the user's local zone to match, so any anchor between 00:00 and
+// 24:00 local works; noon gives ±12h tolerance against worker
+// scheduling drift and DST shifts.
+//
+// Two input shapes are accepted:
+//
+//  1. "yyyy-MM-dd" — the canonical form the (post-fix) frontend sends.
+//     Parsed in the user's location, then bumped to noon.
+//
+//  2. RFC3339 — accepted for forward-compat with any future caller
+//     that genuinely needs hour-precision. However a UTC-midnight
+//     timestamp ("2026-05-15T00:00:00Z") is reinterpreted as "user
+//     picked May 15" because that's exactly what the LEGACY frontend
+//     produced by calling `new Date(dateOnly).toISOString()` — without
+//     this reinterpretation, an old frontend pinned at midnight UTC
+//     would fire reminders one day early for every user west of UTC.
+//
+// tz is the user's IANA name from users.timezone. Unknown / empty
+// falls back to UTC so we degrade to today's pre-fix behaviour rather
+// than crashing.
+func parseUserDate(raw, tz string) (time.Time, error) {
+	loc, err := time.LoadLocation(tz)
+	if err != nil || loc == nil {
+		loc = time.UTC
+	}
+
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		// Legacy-shape detection: exactly UTC-midnight on this calendar
+		// day → treat as date-only (see comment above).
+		if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 &&
+			t.Nanosecond() == 0 && t.Location() == time.UTC {
+			return time.Date(t.Year(), t.Month(), t.Day(), 12, 0, 0, 0, loc), nil
+		}
+		return t, nil
+	}
+
+	t, err := time.ParseInLocation("2006-01-02", raw, loc)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid date %q: %w", raw, err)
+	}
+	return t.Add(12 * time.Hour), nil
+}
 
 // SubscriptionHandler handles subscription CRUD.
 type SubscriptionHandler struct {
@@ -89,12 +137,9 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "name is required"})
 	}
 
-	nextPayment, err := time.Parse(time.RFC3339, body.NextPaymentAt)
+	nextPayment, err := parseUserDate(body.NextPaymentAt, user.Timezone)
 	if err != nil {
-		nextPayment, err = time.Parse("2006-01-02", body.NextPaymentAt)
-		if err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid next_payment_at date"})
-		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid next_payment_at date"})
 	}
 
 	sub := model.Subscription{
@@ -114,11 +159,9 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 	}
 
 	if body.IsTrial && body.TrialEndsAt != nil {
-		t, err := time.Parse(time.RFC3339, *body.TrialEndsAt)
-		if err != nil {
-			t, _ = time.Parse("2006-01-02", *body.TrialEndsAt)
+		if t, err := parseUserDate(*body.TrialEndsAt, user.Timezone); err == nil {
+			sub.TrialEndsAt = &t
 		}
-		sub.TrialEndsAt = &t
 	}
 
 	if err := h.repo.Create(&sub); err != nil {
@@ -206,7 +249,7 @@ func (h *SubscriptionHandler) Update(c fiber.Ctx) error {
 		sub.IsAutoPay = *body.IsAutoPay
 	}
 	if body.NextPaymentAt != nil {
-		if t, err := time.Parse(time.RFC3339, *body.NextPaymentAt); err == nil {
+		if t, err := parseUserDate(*body.NextPaymentAt, user.Timezone); err == nil {
 			if !t.Equal(sub.NextPaymentAt) {
 				clearNotified = true
 			}

@@ -31,7 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { POPULAR_SERVICES } from "@/lib/mockData";
-import { SUPPORTED_CURRENCIES, convertCurrency } from "@/lib/currencyRates";
+import { SUPPORTED_CURRENCIES, convertCurrency, useFxRates } from "@/lib/currencyRates";
 import { formatCurrency, localeFor } from "@/lib/format";
 import { useRoomStore } from "@/stores/roomStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -212,12 +212,17 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
     setSaving(false);
   };
 
+  // Subscribe to FX rates so the inline conversions in the picker list
+  // re-render with fresh rates; also drives the `total` recomputation
+  // by participating in its useMemo deps.
+  const fxRates = useFxRates();
+
   const total = useMemo(
     () => services.reduce(
       (sum, svc) => sum + convertCurrency(svc.amount, svc.currency, currency),
       0,
     ),
-    [services, currency],
+    [services, currency, fxRates],
   );
 
   return (

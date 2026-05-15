@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gofiber/fiber/v3"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"github.com/subguard/backend/internal/config"
@@ -18,19 +20,39 @@ import (
 	"github.com/subguard/backend/internal/workerutil"
 )
 
+// broadcastAPILockKey is the Redis single-flight gate for /admin/broadcast.
+// One key for the whole cluster — only ONE API-initiated broadcast can be
+// in flight at a time. Mirrors bot/broadcast.go's per-message lock but a
+// single global slot is fine for the HTTP path because the admin can
+// only see one "Send" button at a time. TTL covers the maximum run time
+// (matches runBroadcast's 24h ctx); defer-Del releases earlier.
+const broadcastAPILockKey = "broadcast_api_lock"
+
 // AdminHandler handles all admin-panel endpoints.
+//
+// rdb is used by Broadcast() to acquire a cluster-wide single-flight
+// lock; nil disables the lock and falls back to "best-effort, may
+// double-fire under concurrent clicks" — matches the original behaviour
+// for paths that never wire Redis (currently none in prod, only tests).
+// wg is the server-lifecycle WaitGroup; goroutines launched from this
+// handler register on it so graceful shutdown drains them before the
+// DB/Redis pools close.
 type AdminHandler struct {
 	repo   *repository.AdminRepo
 	cfg    *config.Config
 	db     *gorm.DB
 	bot    *bot.Bot
+	rdb    *redis.Client
+	wg     *sync.WaitGroup
 	appCtx context.Context
 }
 
 // NewAdminHandler builds an AdminHandler. appCtx should be the server's
 // parent lifecycle context so background goroutines (broadcast) cancel on
-// shutdown instead of leaking past SIGTERM.
-func NewAdminHandler(db *gorm.DB, cfg *config.Config, b *bot.Bot, appCtx context.Context) *AdminHandler {
+// shutdown instead of leaking past SIGTERM. rdb is required for the
+// /admin/broadcast single-flight lock — pass nil only in tests that
+// don't exercise that path.
+func NewAdminHandler(db *gorm.DB, cfg *config.Config, b *bot.Bot, rdb *redis.Client, appCtx context.Context) *AdminHandler {
 	if appCtx == nil {
 		appCtx = context.Background()
 	}
@@ -39,8 +61,17 @@ func NewAdminHandler(db *gorm.DB, cfg *config.Config, b *bot.Bot, appCtx context
 		cfg:    cfg,
 		db:     db,
 		bot:    b,
+		rdb:    rdb,
 		appCtx: appCtx,
 	}
+}
+
+// WithLifecycle wires the server lifecycle WaitGroup so background
+// broadcast goroutines spawned from HTTP handlers register for graceful
+// drain. Mirrors UserHandler.WithLifecycle. Call from main.go.
+func (h *AdminHandler) WithLifecycle(wg *sync.WaitGroup) *AdminHandler {
+	h.wg = wg
+	return h
 }
 
 // AdminOnly is a middleware that restricts access to admin users.
@@ -167,6 +198,20 @@ func (h *AdminHandler) UpdateSettings(c fiber.Ctx) error {
 const broadcastTickInterval = 36 * time.Millisecond
 
 // Broadcast sends a message to all users.
+//
+// Single-flight guarantees:
+//   - Cluster-wide Redis lock (broadcastAPILockKey) — a second concurrent
+//     POST returns 409 instead of spawning a parallel goroutine that
+//     would double-message every user.
+//   - WaitGroup registration — graceful shutdown waits for an in-flight
+//     broadcast (or its 24h ctx deadline) before closing DB/Redis pools.
+//     Without this the worker would write into a closing connection
+//     pool mid-batch.
+//
+// Both protections were missing from the previous implementation (audit
+// #10); a double-click in the admin TMA would fan out two cluster-wide
+// broadcasts, and a SIGTERM during a broadcast would leak the goroutine
+// past the DB close.
 func (h *AdminHandler) Broadcast(c fiber.Ctx) error {
 	var body struct {
 		TextRU   string `json:"text_ru"`
@@ -177,6 +222,25 @@ func (h *AdminHandler) Broadcast(c fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "text required"})
 	}
 
+	// Acquire the cluster-wide single-flight lock BEFORE doing any other
+	// work. SetNX returns acquired=false if another instance / a
+	// duplicate click is already running. Redis errors fail-open: log,
+	// proceed — better to occasionally double-broadcast than to block
+	// the admin entirely when Redis is degraded.
+	lockAcquired := false
+	if h.rdb != nil {
+		acquired, err := h.rdb.SetNX(c.Context(), broadcastAPILockKey, "1", 24*time.Hour).Result()
+		if err != nil {
+			log.Printf("[broadcast] redis SetNX error: %v — proceeding without lock", err)
+		} else if !acquired {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "broadcast_already_running",
+			})
+		} else {
+			lockAcquired = true
+		}
+	}
+
 	var count int64
 	// Match the filter inside runBroadcast so the "recipients" number we
 	// return to the admin isn't inflated by banned/deleted/blocked users
@@ -185,9 +249,29 @@ func (h *AdminHandler) Broadcast(c fiber.Ctx) error {
 		Where("is_banned = false AND deleted_at IS NULL AND is_active = true").
 		Count(&count)
 
-	go workerutil.Supervise("broadcast", func() {
-		h.runBroadcast(body.TextRU, body.TextEN, body.ImageURL)
-	})
+	if h.wg != nil {
+		h.wg.Add(1)
+	}
+	go func() {
+		if h.wg != nil {
+			defer h.wg.Done()
+		}
+		// Release the lock on goroutine exit (success, error, OR panic
+		// recovered by Supervise's outer frame). Uses a fresh ctx since
+		// h.appCtx may be cancelled by the time we get here on shutdown.
+		if lockAcquired {
+			defer func() {
+				releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := h.rdb.Del(releaseCtx, broadcastAPILockKey).Err(); err != nil {
+					log.Printf("[broadcast] lock release error: %v (TTL will reclaim)", err)
+				}
+			}()
+		}
+		workerutil.Supervise("broadcast", func() {
+			h.runBroadcast(body.TextRU, body.TextEN, body.ImageURL)
+		})
+	}()
 
 	return c.JSON(fiber.Map{
 		"status":     "queued",
@@ -279,6 +363,16 @@ func (h *AdminHandler) sendOne(parent context.Context, chatID int64, text, image
 
 		if err == nil {
 			return true
+		}
+
+		// Permanent per-recipient failures — bail without burning the
+		// remaining attempts. Symmetric with bot/broadcast.go copyOne;
+		// the previous version of this function retried 3 times against
+		// users who had blocked the bot, wasting roughly 3× the API
+		// budget on dead recipients in a typical batch.
+		if workerutil.IsPermanentSendFailure(err) {
+			log.Printf("[broadcast] skip chat %d: %v", chatID, err)
+			return false
 		}
 
 		// 429 path: respect the retry_after hint when present, else fall

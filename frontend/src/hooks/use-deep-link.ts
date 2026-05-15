@@ -10,7 +10,14 @@ import { useTranslation } from "react-i18next";
  */
 export function useDeepLinkHandler(onJoined?: (roomId: string) => void) {
   const processed = useRef(false);
-  const { join, fetchRooms } = useRoomStore();
+  // Granular selectors — was destructuring useRoomStore() which
+  // subscribed the host component (Dashboard) to EVERY roomStore
+  // mutation: mark-paid, fetchDetail, fetchRooms refresh, etc. The
+  // actions themselves are stable refs in Zustand, so selecting them
+  // individually means the host re-renders ZERO times due to this hook.
+  // Audit #18.
+  const join = useRoomStore((s) => s.join);
+  const fetchRooms = useRoomStore((s) => s.fetchRooms);
   const { t } = useTranslation();
 
   useEffect(() => {

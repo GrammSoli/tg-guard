@@ -6,7 +6,7 @@ import { CalendarIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Subscription } from "@/types/subscription";
 import { formatCurrency, formatDate, localeFor } from "@/lib/format";
-import { convertCurrency } from "@/lib/currencyRates";
+import { convertCurrency, useFxRates } from "@/lib/currencyRates";
 import { periodToMonthly } from "@/lib/subscriptionMath";
 import { BrandIcon } from "./BrandIcon";
 import { DateTz } from "./DateTz";
@@ -48,6 +48,11 @@ export function AnalyticsView({ subscriptions, currency }: Props) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const lc = localeFor(locale);
+
+  // Subscribe to FX rates so all the conversions below recompute when
+  // /api/v1/fx lands. Value not used directly — convertCurrency reads
+  // the same store getter — but the subscription drives the rerender.
+  useFxRates();
 
   const [activePreset, setActivePreset] = useState<PresetKey>("all");
   const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>(

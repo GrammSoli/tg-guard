@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/subguard/backend/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // contextKey is the key used to store the authenticated user in Fiber locals.
@@ -57,9 +57,11 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 		// Active ONLY when APP_ENV=test AND TEST_AUTH_SECRET is set to a long
 		// random value (>=32 chars). The client must send:
 		//   X-Telegram-Init-Data: test_user_<tgID>:<TEST_AUTH_SECRET>
-		// In production neither var should be set; if APP_ENV=test slips into
-		// prod by mistake, requests without the shared secret still fall
-		// through to the normal HMAC path below.
+		// Defence-in-depth: config.Load() refuses APP_ENV=test on a
+		// non-local BaseURL unless ALLOW_TEST_MODE_IN_PROD=1, so this
+		// branch can only be reached on dev/CI or with an explicit
+		// override — accidental `APP_ENV=test` in prod env never starts
+		// the binary at all.
 		if os.Getenv("APP_ENV") == "test" {
 			if secret := os.Getenv("TEST_AUTH_SECRET"); len(secret) >= 32 && strings.HasPrefix(raw, "test_user_") {
 				body := strings.TrimPrefix(raw, "test_user_")
@@ -83,66 +85,50 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 			})
 		}
 
-		// Upsert user — Unscoped() to see soft-deleted rows too.
+		// Atomic upsert — INSERT ... ON CONFLICT (telegram_id) DO UPDATE ...
+		// RETURNING * in a single round-trip. Replaces the previous
+		// SELECT → branch-on-NotFound → INSERT-with-race-fallback dance:
+		//
+		//   - No race window: two concurrent /me hits for the same new
+		//     TelegramID both attempt INSERT, one wins, the loser's INSERT
+		//     becomes an UPDATE — no unique-violation, no fallback re-read.
+		//
+		//   - Profile fields use COALESCE(NULLIF(excluded.X, ''), users.X)
+		//     so a Telegram update that omits a field (Telegram occasionally
+		//     drops last_name or photo_url for users with privacy locks)
+		//     does NOT clobber what we have on file. Matches the prior
+		//     `if tgUser.X != ""` guards.
+		//
+		//   - Locale is set on INSERT (from the initData language_code) and
+		//     intentionally NOT in DoUpdates — the user can override it via
+		//     PATCH /me or the bot's lang: picker, and we don't want every
+		//     /me to revert that to the Telegram client default.
+		//
+		//   - deleted_at = NULL on conflict revives a soft-deleted account
+		//     when the user reauthenticates. The DB-side UNIQUE index on
+		//     telegram_id ignores deleted_at, so the conflict triggers
+		//     against the soft-deleted row exactly as desired.
 		var user model.User
-		err = db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user).Error
-
-		switch {
-		case err == nil:
-			// User found (active or soft-deleted). Restore + update profile.
-			profileUpdates := map[string]interface{}{}
-			if tgUser.FirstName != "" {
-				profileUpdates["first_name"] = tgUser.FirstName
-			}
-			if tgUser.LastName != "" {
-				profileUpdates["last_name"] = tgUser.LastName
-			}
-			if tgUser.Username != "" {
-				profileUpdates["username"] = tgUser.Username
-			}
-			if tgUser.PhotoURL != "" {
-				profileUpdates["photo_url"] = tgUser.PhotoURL
-			}
-			if user.DeletedAt.Valid {
-				profileUpdates["deleted_at"] = gorm.Expr("NULL")
-				user.DeletedAt.Valid = false
-			}
-			if len(profileUpdates) > 0 {
-				db.Unscoped().Model(&user).Updates(profileUpdates)
-			}
-
-		case errors.Is(err, gorm.ErrRecordNotFound):
-			// User genuinely doesn't exist → create.
-			user = model.User{
-				TelegramID: tgUser.ID,
-				FirstName:  tgUser.FirstName,
-				LastName:   tgUser.LastName,
-				Username:   tgUser.Username,
-				PhotoURL:   tgUser.PhotoURL,
-				Locale:     localeFromCode(tgUser.LanguageCode),
-			}
-			if createErr := db.Create(&user).Error; createErr != nil {
-				// Fallback: unique constraint race — another request
-				// created the row (or a soft-deleted row exists but the
-				// Unscoped query above failed for a transient reason).
-				// Try one more time with Unscoped.
-				log.Printf("[auth] create failed tg=%d (%v), attempting unscoped fallback", tgUser.ID, createErr)
-				if fallbackErr := db.Unscoped().Where("telegram_id = ?", tgUser.ID).First(&user).Error; fallbackErr != nil {
-					log.Printf("[auth] fallback also failed tg=%d: %v", tgUser.ID, fallbackErr)
-					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-						"error": "failed to create user",
-					})
-				}
-				// Restore if soft-deleted
-				if user.DeletedAt.Valid {
-					db.Unscoped().Model(&user).Update("deleted_at", gorm.Expr("NULL"))
-					user.DeletedAt.Valid = false
-				}
-			}
-
-		default:
-			// Unexpected DB error (connection, missing column, etc.)
-			log.Printf("[auth] db error looking up tg=%d: %v", tgUser.ID, err)
+		user = model.User{
+			TelegramID: tgUser.ID,
+			FirstName:  tgUser.FirstName,
+			LastName:   tgUser.LastName,
+			Username:   tgUser.Username,
+			PhotoURL:   tgUser.PhotoURL,
+			Locale:     localeFromCode(tgUser.LanguageCode),
+		}
+		if upsertErr := db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "telegram_id"}},
+			DoUpdates: clause.Assignments(map[string]interface{}{
+				"first_name": gorm.Expr("COALESCE(NULLIF(EXCLUDED.first_name, ''), users.first_name)"),
+				"last_name":  gorm.Expr("COALESCE(NULLIF(EXCLUDED.last_name, ''), users.last_name)"),
+				"username":   gorm.Expr("COALESCE(NULLIF(EXCLUDED.username, ''), users.username)"),
+				"photo_url":  gorm.Expr("COALESCE(NULLIF(EXCLUDED.photo_url, ''), users.photo_url)"),
+				"deleted_at": gorm.Expr("NULL"),
+				"updated_at": gorm.Expr("NOW()"),
+			}),
+		}).Create(&user).Error; upsertErr != nil {
+			log.Printf("[auth] upsert tg=%d: %v", tgUser.ID, upsertErr)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "database error",
 			})

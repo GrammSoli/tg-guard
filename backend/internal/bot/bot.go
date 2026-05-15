@@ -373,9 +373,14 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 		// Room invite deep link
 		if strings.HasPrefix(param, "room_") {
 			inviteCode := strings.TrimPrefix(param, "room_")
+			// Escape: inviteCode comes from a t.me/?start= deep-link param
+			// — an attacker controls the string and could embed a backtick
+			// to break out of the code-span below and inject Markdown.
+			// Legitimate invite codes pass through unchanged (alphanumeric,
+			// no special characters per the generator's alphabet).
 			b.SendMessage(ctx, &tgbot.SendMessageParams{
-				ChatID: chatID,
-				Text:   fmt.Sprintf("🔗 Join room: open the app and enter code `%s`", inviteCode),
+				ChatID:    chatID,
+				Text:      fmt.Sprintf("🔗 Join room: open the app and enter code `%s`", tgutil.EscapeMarkdown(inviteCode)),
 				ParseMode: "Markdown",
 				ReplyMarkup: &models.InlineKeyboardMarkup{
 					InlineKeyboard: [][]models.InlineKeyboardButton{{

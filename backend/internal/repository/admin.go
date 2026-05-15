@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -106,20 +107,31 @@ func (r *AdminRepo) GetStats() (*StatsResult, error) {
 		TotalRooms         int64
 	}
 	var content contentStats
-	r.db.Raw(`
+	// Content stats are headline numbers in the admin dashboard — a
+	// query failure here used to silently zero them out (the dashboard
+	// would display "0 subscriptions / 0 rooms" and the operator would
+	// think the DB really was empty, not broken). Surface the error so
+	// the handler returns 500 and Sentry captures the cause.
+	if err := r.db.Raw(`
 		SELECT
 			(SELECT COUNT(*) FROM subscriptions)                       AS total_subscriptions,
 			(SELECT COUNT(*) FROM subscriptions WHERE created_at >= $1) AS subs_today,
 			(SELECT COUNT(*) FROM shared_rooms)                        AS total_rooms
-	`, todayStart).Scan(&content)
+	`, todayStart).Scan(&content).Error; err != nil {
+		return nil, fmt.Errorf("content stats: %w", err)
+	}
 	stats.TotalSubscriptions = content.TotalSubscriptions
 	stats.SubsToday = content.SubsToday
 	stats.TotalRooms = content.TotalRooms
 
-	// Today's signups by traffic source (top 5)
+	// Today's signups by traffic source (top 5). Failure here is logged
+	// but NOT fatal — `TodaySources` is a nice-to-have breakdown under
+	// the main "users today" number; we'd rather show the rest of the
+	// dashboard with a blank top-sources strip than 500 the whole call
+	// over a secondary aggregate.
 	if stats.UsersToday > 0 {
 		var sources []TrafficSourceStat
-		r.db.Raw(`
+		if err := r.db.Raw(`
 			SELECT
 				COALESCE(NULLIF(traffic_source_id, ''), 'organic') AS source,
 				COUNT(*) AS count
@@ -128,8 +140,11 @@ func (r *AdminRepo) GetStats() (*StatsResult, error) {
 			GROUP BY source
 			ORDER BY count DESC
 			LIMIT 5
-		`, todayStart).Scan(&sources)
-		stats.TodaySources = sources
+		`, todayStart).Scan(&sources).Error; err != nil {
+			log.Printf("[admin.GetStats] today sources query failed: %v", err)
+		} else {
+			stats.TodaySources = sources
+		}
 	}
 
 	return &stats, nil

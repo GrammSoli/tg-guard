@@ -13,7 +13,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { POPULAR_SERVICES } from "@/lib/mockData";
-import { SUPPORTED_CURRENCIES, convertCurrency } from "@/lib/currencyRates";
+import { SUPPORTED_CURRENCIES, convertCurrency, useFxRates } from "@/lib/currencyRates";
 
 import { formatCurrency, formatDate, localeFor } from "@/lib/format";
 import { useTranslation } from "react-i18next";
@@ -81,6 +81,9 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
   const [pendingPayUid, setPendingPayUid] = useState<number | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const userCurrency = settings.defaultCurrency;
+  // Subscribe to live FX rates — re-render the (many) inline
+  // convertCurrency calls below when /api/v1/fx lands.
+  useFxRates();
 
   // Custom service form state
   const [customMode, setCustomMode] = useState(false);

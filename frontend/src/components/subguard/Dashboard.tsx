@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import type { Subscription } from "@/types/subscription";
 import type { RoomSummary } from "@/types/room";
 import type { ServiceCategory } from "@/lib/mockData";
-import { convertCurrency } from "@/lib/currencyRates";
+import { convertCurrency, useFxRates } from "@/lib/currencyRates";
 import { periodToMonthly } from "@/lib/subscriptionMath";
 import { hapticImpact, hapticNotification, hapticSelection, initTelegramApp } from "@/lib/telegram";
 import { useTelegramBackButton } from "@/hooks/use-telegram-back";
@@ -194,6 +194,12 @@ export function Dashboard({ user }: Props) {
     return list;
   }, [items, debouncedFilter, filterCategories, sortBy, showSubscriptions]);
 
+  // Subscribe to live FX rates so this component recomputes totalMonthly
+  // when /api/v1/fx lands a fresh snapshot. Including `fxRates` in the
+  // useMemo deps below is what triggers the recalc; the value itself
+  // isn't read here — convertCurrency reads via the same store getter.
+  const fxRates = useFxRates();
+
   const totalMonthly = useMemo(
     () =>
       items
@@ -203,7 +209,7 @@ export function Dashboard({ user }: Props) {
             sum + convertCurrency(periodToMonthly(s), s.currency, settings.defaultCurrency),
           0,
         ),
-    [items, settings.defaultCurrency],
+    [items, settings.defaultCurrency, fxRates],
   );
 
   // ── Paywall gate ─────────────────────────────────────

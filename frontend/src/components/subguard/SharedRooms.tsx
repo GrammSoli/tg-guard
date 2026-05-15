@@ -2,7 +2,7 @@ import { ArrowRight, Plus, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { RoomSummary } from "@/types/room";
 import { formatCurrency, localeFor } from "@/lib/format";
-import { convertCurrency } from "@/lib/currencyRates";
+import { convertCurrency, useFxRates } from "@/lib/currencyRates";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useDragScroll } from "@/hooks/useDragScroll";
 import { ServiceLogo } from "./ServiceLogo";
@@ -22,6 +22,9 @@ export function SharedRooms({ rooms, onViewAll, onOpen, onCreateRoom }: Props) {
   // sync, locale flip, notification toggle). See audit F1. Now only
   // re-renders when defaultCurrency itself changes — which is rare.
   const userCurrency = useSettingsStore((s) => s.settings.defaultCurrency);
+  // Subscribe to live FX rates so the inline convertCurrency call in
+  // the rooms loop re-runs with fresh rates when /api/v1/fx lands.
+  useFxRates();
   const dragScrollRef = useDragScroll<HTMLDivElement>();
 
   return (

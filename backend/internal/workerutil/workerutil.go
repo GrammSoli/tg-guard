@@ -129,3 +129,40 @@ func IsRateLimit(err error) bool {
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "too many requests")
 }
+
+// permanentSendFailurePhrases are substrings of Telegram Bot API error
+// descriptions that mean "this specific recipient is unreachable, and
+// retrying will not help." Each is a stable phrase that's appeared in
+// the API for years — matching whole phrases (not a bare "forbidden")
+// prevents a transient global 403 (e.g. token rotation, edge proxy)
+// from being misread as a per-recipient block and skipping every user
+// in the batch.
+var permanentSendFailurePhrases = []string{
+	"bot was blocked by the user",   // user blocked our bot
+	"user is deactivated",           // user deleted their Telegram account
+	"chat not found",                // chat_id is wrong / chat was deleted
+	"bot can't initiate conversation", // user never /start-ed the bot
+	"bot was kicked",                // removed from a group/channel (defensive)
+	"chat_write_forbidden",          // group-side write permission revoked
+}
+
+// IsPermanentSendFailure reports whether err describes a Telegram send
+// failure that is specific to one recipient and will not succeed on
+// retry. Broadcast / notification loops should skip the recipient
+// without burning attempts on it.
+//
+// Anything not on the permanent list — including bare "Forbidden:"
+// errors that don't carry one of the recognised phrases — is treated
+// as transient and falls back to the caller's normal retry path.
+func IsPermanentSendFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, p := range permanentSendFailurePhrases {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
+}

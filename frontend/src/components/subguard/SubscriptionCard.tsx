@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { formatCurrency, formatDate, localeFor } from "@/lib/format";
-import { convertCurrency } from "@/lib/currencyRates";
+import { convertCurrency, useFxRates } from "@/lib/currencyRates";
 import { useTranslation } from "react-i18next";
 import type { Subscription } from "@/types/subscription";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -32,6 +32,11 @@ export const SubscriptionCard = memo(function SubscriptionCard({
   // worst case in the project: any toggle/save in NotificationsSheet
   // would re-render 100 cards. See audit F2.
   const userCurrency = useSettingsStore((s) => s.settings.defaultCurrency);
+  // Subscribe to FX rates so the card re-renders when /api/v1/fx lands
+  // a fresh snapshot. Value not used directly — convertCurrency reads
+  // via the same store getter — but the subscription is what triggers
+  // the rerender.
+  useFxRates();
 
   // Convert to user's preferred currency
   const displayAmount = convertCurrency(s.amount, s.currency, userCurrency);
