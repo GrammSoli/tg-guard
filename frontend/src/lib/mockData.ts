@@ -97,6 +97,7 @@ export const mockSubscriptions: Subscription[] = [
 export const mockUserSettings: UserSettings = {
   isAdmin: true,
   isSubscribed: true,
+  premiumExpiresAt: null,
   locale: "en",
   defaultCurrency: "USD",
   cpaActive: true,

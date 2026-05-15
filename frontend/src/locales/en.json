@@ -302,6 +302,11 @@
   "premium.payStars": "Pay ⭐️ {{price}}",
   "premium.payCrypto": "Pay with crypto • ${{price}}",
   "premium.processing": "Processing...",
+  "premium.planMonth": "1 Month",
+  "premium.planLifetime": "Forever",
+  "premium.bestValue": "Best value",
+  "premium.activeUntil": "Active until {{date}}",
+  "premium.lifetimeAccess": "Lifetime access",
   "maintenance.title": "Maintenance Break",
   "maintenance.subtitle": "We are adding new features, we'll be right back ☕️"
 }

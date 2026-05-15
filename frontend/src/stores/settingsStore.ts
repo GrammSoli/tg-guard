@@ -14,6 +14,7 @@ interface MeResponse {
   timezone: string;
   base_currency: string;
   is_donator: boolean;
+  premium_expires_at: string | null;
   is_admin: boolean;
   notifications_enabled: boolean;
   notification_time: string;
@@ -32,6 +33,7 @@ const defaultSettings: UserSettings = {
   defaultCurrency: "USD",
   isAdmin: false,
   isSubscribed: false,
+  premiumExpiresAt: null,
   cpaActive: false,
   notificationsEnabled: true,
   timezone: "UTC",
@@ -70,6 +72,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           defaultCurrency: me.base_currency ?? "USD",
           isAdmin: me.is_admin ?? false,
           isSubscribed: me.is_donator ?? false,
+          premiumExpiresAt: me.premium_expires_at ?? null,
           cpaActive: false,
           notificationsEnabled: me.notifications_enabled ?? true,
           timezone: me.timezone ?? "UTC",

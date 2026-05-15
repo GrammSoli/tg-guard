@@ -87,6 +87,9 @@ export interface SponsoredOffer {
 export interface UserSettings {
   isAdmin: boolean;
   isSubscribed: boolean;
+  /** ISO timestamp when a time-limited Premium grant lapses. null =
+   *  lifetime (or no Premium — disambiguate via isSubscribed). */
+  premiumExpiresAt: string | null;
   locale: "en" | "ru";
   defaultCurrency: string;
   cpaActive: boolean;

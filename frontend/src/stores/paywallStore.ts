@@ -5,13 +5,20 @@ interface PaywallConfig {
   paywall_enabled: boolean;
   free_subs_limit: number;
   free_room_limit: number;
-  // Premium pricing, locale-split. Stars are whole Telegram Stars;
-  // crypto values are whole USD. PremiumSheet picks the pair matching
-  // the app's current i18n language.
+  // Legacy flat pricing — kept so older clients/back-compat don't break.
   price_stars_ru: number;
   price_stars_en: number;
   price_crypto_usd_ru: number;
   price_crypto_usd_en: number;
+  // Plan-split pricing (Month / Lifetime). Stars are whole Telegram
+  // Stars, locale-split; crypto is a single whole-USD amount per plan.
+  // PremiumSheet picks the Stars pair by i18n language.
+  price_stars_month_ru: number;
+  price_stars_lifetime_ru: number;
+  price_stars_month_en: number;
+  price_stars_lifetime_en: number;
+  price_crypto_month_usd: number;
+  price_crypto_lifetime_usd: number;
 }
 
 interface PaywallStore {
@@ -31,6 +38,12 @@ export const usePaywallStore = create<PaywallStore>((set) => ({
     price_stars_en: 100,
     price_crypto_usd_ru: 1,
     price_crypto_usd_en: 2,
+    price_stars_month_ru: 75,
+    price_stars_lifetime_ru: 500,
+    price_stars_month_en: 150,
+    price_stars_lifetime_en: 1000,
+    price_crypto_month_usd: 2,
+    price_crypto_lifetime_usd: 20,
   },
   loaded: false,
 

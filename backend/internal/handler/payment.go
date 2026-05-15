@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -32,6 +33,60 @@ type PaymentHandler struct {
 
 func NewPaymentHandler(db *gorm.DB, cfg *config.Config, b *tgbot.Bot) *PaymentHandler {
 	return &PaymentHandler{cfg: cfg, db: db, bot: b}
+}
+
+// planRequest is the JSON body both invoice endpoints accept.
+type planRequest struct {
+	Plan string `json:"plan"`
+}
+
+// normalizePlan coerces a request plan to one of the two valid values.
+// Anything unrecognised (including empty) falls back to "lifetime" — the
+// tier the frontend pre-selects, so a missing field is never a 400.
+func normalizePlan(p string) string {
+	if p == "month" {
+		return "month"
+	}
+	return "lifetime"
+}
+
+// premiumExpiryFor returns the premium_expires_at value a plan grants:
+// one month out for "month", nil (lifetime — never expires) otherwise.
+func premiumExpiryFor(plan string) *time.Time {
+	if plan == "month" {
+		t := time.Now().UTC().AddDate(0, 1, 0)
+		return &t
+	}
+	return nil
+}
+
+// parsePaymentPayload extracts (plan, userID) from an invoice payload.
+// New format: "premium_<method>_<plan>_<userID>" (4 parts). The legacy
+// 3-part "premium_<method>_<userID>" is still accepted and treated as a
+// lifetime grant, so invoices created before this deploy still resolve.
+func parsePaymentPayload(payload, method string) (plan string, userID uint64, ok bool) {
+	prefix := "premium_" + method + "_"
+	if !strings.HasPrefix(payload, prefix) {
+		return "", 0, false
+	}
+	parts := strings.Split(payload, "_")
+	switch len(parts) {
+	case 4: // premium / method / plan / uid
+		plan = normalizePlan(parts[2])
+		uid, err := strconv.ParseUint(parts[3], 10, 64)
+		if err != nil {
+			return "", 0, false
+		}
+		return plan, uid, true
+	case 3: // legacy premium / method / uid → lifetime
+		uid, err := strconv.ParseUint(parts[2], 10, 64)
+		if err != nil {
+			return "", 0, false
+		}
+		return "lifetime", uid, true
+	default:
+		return "", 0, false
+	}
 }
 
 // ── Stars ───────────────────────────────────────────────────────────
@@ -57,35 +112,44 @@ func (h *PaymentHandler) CreateStarsInvoice(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "settings unavailable"})
 	}
 
+	var body planRequest
+	_ = c.Bind().JSON(&body) // empty / missing body → lifetime default
+	plan := normalizePlan(body.Plan)
+
 	locale := user.Locale
 	if locale == "" {
 		locale = "en"
 	}
+	isRu := strings.HasPrefix(locale, "ru")
+	isMonth := plan == "month"
 
 	var price int
 	var title, description, label string
-
-	if strings.HasPrefix(locale, "ru") {
-		price = settings.PriceStarsRU
-		title = "SubGuard Премиум"
-		description = "Разблокировка всех премиум-функций"
-		label = "Премиум"
+	if isRu {
+		title, label = "SubGuard Премиум", "Премиум"
+		if isMonth {
+			price, description = settings.PriceStarsMonthRU, "Premium на 1 месяц"
+		} else {
+			price, description = settings.PriceStarsLifetimeRU, "Premium навсегда"
+		}
 	} else {
-		price = settings.PriceStarsEN
-		title = "SubGuard Premium"
-		description = "Unlock all premium features"
-		label = "Premium"
+		title, label = "SubGuard Premium", "Premium"
+		if isMonth {
+			price, description = settings.PriceStarsMonthEN, "Premium for 1 month"
+		} else {
+			price, description = settings.PriceStarsLifetimeEN, "Premium forever"
+		}
 	}
 
 	if price <= 0 {
-		log.Printf("[payment.stars] invalid price=%d for locale=%s", price, locale)
+		log.Printf("[payment.stars] invalid price=%d for locale=%s plan=%s", price, locale, plan)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "invalid price configuration"})
 	}
 
 	invoiceURL, err := h.bot.CreateInvoiceLink(c.Context(), &tgbot.CreateInvoiceLinkParams{
 		Title:         title,
 		Description:   description,
-		Payload:       fmt.Sprintf("premium_stars_%d", user.ID),
+		Payload:       fmt.Sprintf("premium_stars_%s_%d", plan, user.ID),
 		ProviderToken: "",
 		Currency:      "XTR",
 		Prices: []models.LabeledPrice{
@@ -142,23 +206,31 @@ func (h *PaymentHandler) CreateCryptoInvoice(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "settings unavailable"})
 	}
 
+	var planBody planRequest
+	_ = c.Bind().JSON(&planBody) // empty / missing body → lifetime default
+	plan := normalizePlan(planBody.Plan)
+
 	locale := user.Locale
 	if locale == "" {
 		locale = "en"
 	}
+	isRu := strings.HasPrefix(locale, "ru")
 
+	// Crypto pricing is a single USD amount per plan (not locale-split).
 	var price int
-	var description string
-	if strings.HasPrefix(locale, "ru") {
-		price = settings.PriceCryptoUsdRU
-		description = "SubGuard Премиум"
+	if plan == "month" {
+		price = settings.PriceCryptoMonthUSD
 	} else {
-		price = settings.PriceCryptoUsdEN
-		description = "SubGuard Premium"
+		price = settings.PriceCryptoLifetimeUSD
+	}
+
+	description := "SubGuard Premium"
+	if isRu {
+		description = "SubGuard Премиум"
 	}
 
 	if price <= 0 {
-		log.Printf("[payment.crypto] invalid price=%d for locale=%s", price, locale)
+		log.Printf("[payment.crypto] invalid price=%d for plan=%s", price, plan)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "invalid price configuration"})
 	}
 
@@ -167,7 +239,7 @@ func (h *PaymentHandler) CreateCryptoInvoice(c fiber.Ctx) error {
 		Fiat:           "USD",
 		Amount:         strconv.Itoa(price),
 		Description:    description,
-		Payload:        fmt.Sprintf("premium_crypto_%d", user.ID),
+		Payload:        fmt.Sprintf("premium_crypto_%s_%d", plan, user.ID),
 		AllowComments:  false,
 		AllowAnonymous: false,
 	}
@@ -268,22 +340,13 @@ func (h *PaymentHandler) HandleCryptoWebhook(c fiber.Ctx) error {
 	log.Printf("📥 [crypto/webhook] invoice_id=%d status=%s payload=%q amount=%s %s",
 		invoice.InvoiceID, invoice.Status, invoice.Payload, invoice.Amount, invoice.Fiat)
 
-	// Safe payload parsing: "premium_crypto_<userID>"
-	if !strings.HasPrefix(invoice.Payload, "premium_crypto_") {
-		log.Printf("❌ [crypto/webhook] unknown payload=%q, ignoring", invoice.Payload)
+	// Payload: "premium_crypto_<plan>_<userID>" (legacy 3-part also OK).
+	plan, userID, ok := parsePaymentPayload(invoice.Payload, "crypto")
+	if !ok {
+		log.Printf("❌ [crypto/webhook] unknown/malformed payload=%q, ignoring", invoice.Payload)
 		return c.SendStatus(fiber.StatusOK)
 	}
-	parts := strings.Split(invoice.Payload, "_")
-	if len(parts) != 3 {
-		log.Printf("❌ [crypto/webhook] malformed payload=%q", invoice.Payload)
-		return c.SendStatus(fiber.StatusOK)
-	}
-	userID, err := strconv.ParseUint(parts[2], 10, 64)
-	if err != nil {
-		log.Printf("❌ [crypto/webhook] invalid user ID: %v", err)
-		return c.SendStatus(fiber.StatusOK)
-	}
-	log.Printf("✅ [crypto/webhook] Parsed UserID: %d", userID)
+	log.Printf("✅ [crypto/webhook] Parsed plan=%s UserID=%d", plan, userID)
 
 	// Idempotency: "crypto_<invoice_id>" in the shared charge ID column
 	chargeID := fmt.Sprintf("crypto_%d", invoice.InvoiceID)
@@ -305,11 +368,15 @@ func (h *PaymentHandler) HandleCryptoWebhook(c fiber.Ctx) error {
 	amountCents := int(amountFloat * 100)
 
 	log.Printf("💽 [crypto/webhook] Activating premium for user %d", user.ID)
+	expiresAt := premiumExpiryFor(plan)
 	txErr := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.User{}).
 			Where("id = ?", user.ID).
-			Update("is_donator", true).Error; err != nil {
-			return fmt.Errorf("set is_donator: %w", err)
+			Updates(map[string]interface{}{
+				"is_donator":         true,
+				"premium_expires_at": expiresAt,
+			}).Error; err != nil {
+			return fmt.Errorf("set premium: %w", err)
 		}
 		donation := model.Donation{
 			UserID:                  user.ID,

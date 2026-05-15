@@ -861,23 +861,33 @@ func handleSuccessfulPayment(ctx context.Context, b *tgbot.Bot, update *models.U
 		payment.TotalAmount, payment.Currency, msg.From.ID)
 
 	// ── Step 1: Safe payload parsing ──────────────────────────
-	// Expected format: "premium_stars_<userID>"
+	// Format: "premium_stars_<plan>_<userID>" (4 parts). The legacy
+	// 3-part "premium_stars_<userID>" is still accepted as a lifetime
+	// grant so invoices created before this deploy still resolve.
 	if !strings.HasPrefix(payment.InvoicePayload, "premium_stars_") {
 		log.Printf("❌ [bot/payment] Unknown payload prefix=%q, ignoring", payment.InvoicePayload)
 		return
 	}
 	parts := strings.Split(payment.InvoicePayload, "_")
-	log.Printf("🔍 [bot/payment] Payload split into %d parts: %v", len(parts), parts)
-	if len(parts) != 3 {
-		log.Printf("❌ [bot/payment] Malformed payload=%q (expected 3 parts, got %d)", payment.InvoicePayload, len(parts))
+	var plan, uidStr string
+	switch len(parts) {
+	case 4: // premium / stars / plan / uid
+		plan, uidStr = parts[2], parts[3]
+		if plan != "month" {
+			plan = "lifetime"
+		}
+	case 3: // legacy premium / stars / uid
+		plan, uidStr = "lifetime", parts[2]
+	default:
+		log.Printf("❌ [bot/payment] Malformed payload=%q (got %d parts)", payment.InvoicePayload, len(parts))
 		return
 	}
-	userID, err := strconv.ParseUint(parts[2], 10, 64)
+	userID, err := strconv.ParseUint(uidStr, 10, 64)
 	if err != nil {
-		log.Printf("❌ [bot/payment] Failed to parse user ID from %q: %v", parts[2], err)
+		log.Printf("❌ [bot/payment] Failed to parse user ID from %q: %v", uidStr, err)
 		return
 	}
-	log.Printf("✅ [bot/payment] Parsed UserID: %d (uint64)", userID)
+	log.Printf("✅ [bot/payment] Parsed plan=%s UserID=%d", plan, userID)
 
 	// ── Step 2: Idempotency — dedup by TelegramPaymentChargeID ──
 	chargeID := payment.TelegramPaymentChargeID
@@ -906,14 +916,24 @@ func handleSuccessfulPayment(ctx context.Context, b *tgbot.Bot, update *models.U
 	// ── Step 4: DB update ───────────────────────────────────────
 	log.Printf("💽 [bot/payment] Attempting to update user %d to is_donator = true and create donation", user.ID)
 
+	// month → expires in 1 month; lifetime → NULL (never expires).
+	var expiresAt *time.Time
+	if plan == "month" {
+		t := time.Now().UTC().AddDate(0, 1, 0)
+		expiresAt = &t
+	}
 	txErr := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&model.User{}).
 			Where("id = ?", user.ID).
-			Update("is_donator", true)
+			Updates(map[string]interface{}{
+				"is_donator":         true,
+				"premium_expires_at": expiresAt,
+			})
 		if result.Error != nil {
-			return fmt.Errorf("set is_donator: %w", result.Error)
+			return fmt.Errorf("set premium: %w", result.Error)
 		}
-		log.Printf("💽 [bot/payment] UPDATE users SET is_donator=true WHERE id=%d — rows_affected=%d", user.ID, result.RowsAffected)
+		log.Printf("💽 [bot/payment] UPDATE users SET is_donator=true, premium_expires_at=%v WHERE id=%d — rows_affected=%d",
+			expiresAt, user.ID, result.RowsAffected)
 
 		donation := model.Donation{
 			UserID:                  user.ID,
