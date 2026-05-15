@@ -1094,11 +1094,14 @@ func (p *adminPanel) handlePricesMenu(ctx context.Context, b *tgbot.Bot, chatID 
 		"1 Месяц: *%d* | Навсегда: *%d*\n\n"+
 		"⭐ Telegram Stars (EN):\n"+
 		"1 Месяц: *%d* | Навсегда: *%d*\n\n"+
-		"💎 CryptoPay (USD):\n"+
+		"💎 CryptoPay (USD) - RU:\n"+
+		"1 Месяц: *$%d* | Навсегда: *$%d*\n\n"+
+		"💎 CryptoPay (USD) - EN:\n"+
 		"1 Месяц: *$%d* | Навсегда: *$%d*",
 		s.PriceStarsMonthRU, s.PriceStarsLifetimeRU,
 		s.PriceStarsMonthEN, s.PriceStarsLifetimeEN,
-		s.PriceCryptoMonthUSD, s.PriceCryptoLifetimeUSD)
+		s.PriceCryptoMonthUSDRU, s.PriceCryptoLifetimeUSDRU,
+		s.PriceCryptoMonthUSDEN, s.PriceCryptoLifetimeUSDEN)
 
 	// priceRow builds a "[ −step ] [ label ] [ +step ]" keyboard row.
 	priceRow := func(label, key, minus, plus string) []models.InlineKeyboardButton {
@@ -1115,8 +1118,10 @@ func (p *adminPanel) handlePricesMenu(ctx context.Context, b *tgbot.Bot, chatID 
 			priceRow("⭐ Навсегда RU", "pr_st_l_ru", "➖10", "➕10"),
 			priceRow("⭐ Месяц EN", "pr_st_m_en", "➖10", "➕10"),
 			priceRow("⭐ Навсегда EN", "pr_st_l_en", "➖10", "➕10"),
-			priceRow("💎 Месяц USD", "pr_cr_m_usd", "➖1", "➕1"),
-			priceRow("💎 Навсегда USD", "pr_cr_l_usd", "➖1", "➕1"),
+			priceRow("💎 Месяц RU", "pr_cr_m_ru", "➖1", "➕1"),
+			priceRow("💎 Навсегда RU", "pr_cr_l_ru", "➖1", "➕1"),
+			priceRow("💎 Месяц EN", "pr_cr_m_en", "➖1", "➕1"),
+			priceRow("💎 Навсегда EN", "pr_cr_l_en", "➖1", "➕1"),
 			{{Text: "🔙 Назад", CallbackData: "admin_settings"}},
 		},
 	}
@@ -1162,10 +1167,14 @@ func (p *adminPanel) handlePriceCallback(ctx context.Context, b *tgbot.Bot, chat
 		s.PriceStarsMonthEN = clampMin(s.PriceStarsMonthEN+starsDelta, priceStarsFloor)
 	case "pr_st_l_en":
 		s.PriceStarsLifetimeEN = clampMin(s.PriceStarsLifetimeEN+starsDelta, priceStarsFloor)
-	case "pr_cr_m_usd":
-		s.PriceCryptoMonthUSD = clampMin(s.PriceCryptoMonthUSD+cryptoDelta, priceCryptoFloor)
-	case "pr_cr_l_usd":
-		s.PriceCryptoLifetimeUSD = clampMin(s.PriceCryptoLifetimeUSD+cryptoDelta, priceCryptoFloor)
+	case "pr_cr_m_ru":
+		s.PriceCryptoMonthUSDRU = clampMin(s.PriceCryptoMonthUSDRU+cryptoDelta, priceCryptoFloor)
+	case "pr_cr_l_ru":
+		s.PriceCryptoLifetimeUSDRU = clampMin(s.PriceCryptoLifetimeUSDRU+cryptoDelta, priceCryptoFloor)
+	case "pr_cr_m_en":
+		s.PriceCryptoMonthUSDEN = clampMin(s.PriceCryptoMonthUSDEN+cryptoDelta, priceCryptoFloor)
+	case "pr_cr_l_en":
+		s.PriceCryptoLifetimeUSDEN = clampMin(s.PriceCryptoLifetimeUSDEN+cryptoDelta, priceCryptoFloor)
 	default:
 		return
 	}

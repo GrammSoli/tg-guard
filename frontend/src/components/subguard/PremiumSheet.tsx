@@ -50,8 +50,10 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
   const isRu = i18n.language.startsWith("ru");
   const starsMonth = isRu ? config.price_stars_month_ru : config.price_stars_month_en;
   const starsLifetime = isRu ? config.price_stars_lifetime_ru : config.price_stars_lifetime_en;
-  const cryptoMonth = config.price_crypto_month_usd;
-  const cryptoLifetime = config.price_crypto_lifetime_usd;
+  const cryptoMonth = isRu ? config.price_crypto_month_usd_ru : config.price_crypto_month_usd_en;
+  const cryptoLifetime = isRu
+    ? config.price_crypto_lifetime_usd_ru
+    : config.price_crypto_lifetime_usd_en;
 
   const starsPrice = selectedPlan === "month" ? starsMonth : starsLifetime;
   const cryptoPrice = selectedPlan === "month" ? cryptoMonth : cryptoLifetime;

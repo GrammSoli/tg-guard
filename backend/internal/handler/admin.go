@@ -68,12 +68,14 @@ func (h *AdminHandler) GetPublicConfig(c fiber.Ctx) error {
 		// Plan-split pricing (Month / Lifetime). Stars locale-split;
 		// crypto a single USD amount per plan. The PremiumSheet picks
 		// the Stars pair by i18n language and shows both plans.
-		"price_stars_month_ru":      s.PriceStarsMonthRU,
-		"price_stars_lifetime_ru":   s.PriceStarsLifetimeRU,
-		"price_stars_month_en":      s.PriceStarsMonthEN,
-		"price_stars_lifetime_en":   s.PriceStarsLifetimeEN,
-		"price_crypto_month_usd":    s.PriceCryptoMonthUSD,
-		"price_crypto_lifetime_usd": s.PriceCryptoLifetimeUSD,
+		"price_stars_month_ru":         s.PriceStarsMonthRU,
+		"price_stars_lifetime_ru":      s.PriceStarsLifetimeRU,
+		"price_stars_month_en":         s.PriceStarsMonthEN,
+		"price_stars_lifetime_en":      s.PriceStarsLifetimeEN,
+		"price_crypto_month_usd_ru":    s.PriceCryptoMonthUSDRU,
+		"price_crypto_lifetime_usd_ru": s.PriceCryptoLifetimeUSDRU,
+		"price_crypto_month_usd_en":    s.PriceCryptoMonthUSDEN,
+		"price_crypto_lifetime_usd_en": s.PriceCryptoLifetimeUSDEN,
 	})
 }
 

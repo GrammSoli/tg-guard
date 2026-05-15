@@ -182,12 +182,14 @@ type AppSettings struct {
 	// locale-split (RU/EN); crypto is a single USD amount per plan.
 	// The mini-app reads these from GET /api/v1/config; the bot admin
 	// panel edits them in ±10 (Stars) / ±1 (crypto) steps.
-	PriceStarsMonthRU      int `gorm:"default:75;not null" json:"price_stars_month_ru"`
-	PriceStarsLifetimeRU   int `gorm:"default:500;not null" json:"price_stars_lifetime_ru"`
-	PriceStarsMonthEN      int `gorm:"default:150;not null" json:"price_stars_month_en"`
-	PriceStarsLifetimeEN   int `gorm:"default:1000;not null" json:"price_stars_lifetime_en"`
-	PriceCryptoMonthUSD    int `gorm:"default:2;not null" json:"price_crypto_month_usd"`
-	PriceCryptoLifetimeUSD int `gorm:"default:20;not null" json:"price_crypto_lifetime_usd"`
+	PriceStarsMonthRU        int `gorm:"default:75;not null" json:"price_stars_month_ru"`
+	PriceStarsLifetimeRU     int `gorm:"default:500;not null" json:"price_stars_lifetime_ru"`
+	PriceStarsMonthEN        int `gorm:"default:150;not null" json:"price_stars_month_en"`
+	PriceStarsLifetimeEN     int `gorm:"default:1000;not null" json:"price_stars_lifetime_en"`
+	PriceCryptoMonthUSDRU    int `gorm:"default:1;not null" json:"price_crypto_month_usd_ru"`
+	PriceCryptoLifetimeUSDRU int `gorm:"default:10;not null" json:"price_crypto_lifetime_usd_ru"`
+	PriceCryptoMonthUSDEN    int `gorm:"default:2;not null" json:"price_crypto_month_usd_en"`
+	PriceCryptoLifetimeUSDEN int `gorm:"default:20;not null" json:"price_crypto_lifetime_usd_en"`
 }
 
 // Donation logs a successful Telegram Stars payment.
