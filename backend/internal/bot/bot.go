@@ -90,6 +90,13 @@ func Setup(
 		},
 	)
 
+	// Language selection callback from the /start onboarding flow.
+	b.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, "lang:", tgbot.MatchTypePrefix,
+		func(ctx context.Context, b *tgbot.Bot, update *models.Update) {
+			handleLangCallback(ctx, b, update, cfg, db)
+		},
+	)
+
 	// /force_notify — admin-only test command that runs the notification
 	// worker for the calling admin, ignoring time checks and dedup.
 	b.RegisterHandler(tgbot.HandlerTypeMessageText, "/force_notify", tgbot.MatchTypeExact,
@@ -333,13 +340,15 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 		}
 	}
 
-	// Default welcome message
+	// Step 1 of onboarding: language picker. The actual welcome message
+	// is sent by handleLangCallback after the user picks a language.
 	b.SendMessage(ctx, &tgbot.SendMessageParams{
 		ChatID: chatID,
-		Text:   "👋 Welcome to SubGuard!\nTrack and split your subscriptions easily.",
+		Text:   "🌍 Укажите ваш язык / Please choose your language:",
 		ReplyMarkup: &models.InlineKeyboardMarkup{
 			InlineKeyboard: [][]models.InlineKeyboardButton{{
-				{Text: "🚀 Open App", WebApp: &models.WebAppInfo{URL: cfg.BaseURL}},
+				{Text: "🇷🇺 Русский", CallbackData: "lang:ru"},
+				{Text: "🇬🇧 English", CallbackData: "lang:en"},
 			}},
 		},
 	})
@@ -534,6 +543,79 @@ func handleCancelCallback(ctx context.Context, b *tgbot.Bot, update *models.Upda
 			ParseMode: "Markdown",
 		}); err != nil {
 			log.Printf("[bot.cancel] edit message error: %v", err)
+		}
+	}
+}
+
+// handleLangCallback processes the inline language-selection buttons from
+// the /start onboarding flow. It persists the chosen locale to the DB,
+// then edits the original message into a localized welcome with a WebApp
+// button whose URL carries the ?lang= parameter so the React front-end
+// can initialize i18n before the first render.
+func handleLangCallback(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *config.Config, db *gorm.DB) {
+	cb := update.CallbackQuery
+	if cb == nil {
+		return
+	}
+
+	// Ack the callback to dismiss the spinner.
+	if _, err := b.AnswerCallbackQuery(ctx, &tgbot.AnswerCallbackQueryParams{
+		CallbackQueryID: cb.ID,
+	}); err != nil {
+		log.Printf("[bot.lang] AnswerCallbackQuery error: %v", err)
+	}
+
+	lang := strings.TrimPrefix(cb.Data, "lang:")
+	if lang != "ru" && lang != "en" {
+		lang = "en"
+	}
+
+	// Persist the language choice.
+	if err := db.WithContext(ctx).Model(&model.User{}).
+		Where("telegram_id = ?", cb.From.ID).
+		Update("locale", lang).Error; err != nil {
+		log.Printf("[bot.lang] DB update locale tg=%d lang=%s: %v", cb.From.ID, lang, err)
+	}
+
+	// Build WebApp URL with language parameter.
+	webAppURL := cfg.BaseURL + "?lang=" + lang
+
+	// Localized welcome text and button label.
+	var text, btnLabel string
+	if lang == "ru" {
+		text = "🛡 <b>Добро пожаловать в SubGuard!</b>\n\n" +
+			"Ваш умный трекер подписок. Мы поможем навести порядок в регулярных платежах и сэкономить деньги.\n\n" +
+			"✨ <b>Что мы умеем:</b>\n" +
+			"• Напоминать о списаниях до того, как они произойдут\n" +
+			"• Делить стоимость подписок с друзьями и семьей\n" +
+			"• Контролировать все расходы в одной удобной панели\n\n" +
+			"Жмите кнопку ниже, чтобы запустить приложение и взять подписки под контроль 👇"
+		btnLabel = "🚀 Открыть приложение"
+	} else {
+		text = "🛡 <b>Welcome to SubGuard!</b>\n\n" +
+			"Your smart subscription tracker. We'll help you organize your recurring payments and save money.\n\n" +
+			"✨ <b>What you can do:</b>\n" +
+			"• Get notified before you get charged\n" +
+			"• Split subscription costs with friends and family\n" +
+			"• Track all expenses in one clean dashboard\n\n" +
+			"Tap the button below to launch the app and take control of your subscriptions 👇"
+		btnLabel = "🚀 Open App"
+	}
+
+	// Edit the original language-picker message into the welcome.
+	if cb.Message.Message != nil {
+		if _, err := b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+			ChatID:    cb.Message.Message.Chat.ID,
+			MessageID: cb.Message.Message.ID,
+			Text:      text,
+			ParseMode: "HTML",
+			ReplyMarkup: &models.InlineKeyboardMarkup{
+				InlineKeyboard: [][]models.InlineKeyboardButton{{
+					{Text: btnLabel, WebApp: &models.WebAppInfo{URL: webAppURL}},
+				}},
+			},
+		}); err != nil {
+			log.Printf("[bot.lang] edit message error: %v", err)
 		}
 	}
 }
