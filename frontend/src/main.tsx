@@ -23,6 +23,18 @@ if (SENTRY_DSN) {
     // Aborted fetches (user navigated away) and bare promise rejections
     // are expected noise in a Telegram WebView — drop them.
     ignoreErrors: ["AbortError", "Non-Error promise rejection captured"],
+    // Session Replay: record DOM only on errors. maskAllText + blockAllMedia
+    // because this is a billing UI showing amounts, payment providers and
+    // Telegram usernames — default-mask everything, opt back in per-element
+    // later if needed.
+    integrations: [
+      Sentry.replayIntegration({
+        maskAllText: true,
+        blockAllMedia: true,
+      }),
+    ],
+    replaysSessionSampleRate: 0,
+    replaysOnErrorSampleRate: 1.0,
   });
 }
 

@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/subguard/backend/internal/model"
+	"github.com/subguard/backend/internal/observability"
 )
 
 // BillingResetWorker resets payment statuses on the billing day for each room.
@@ -66,6 +67,7 @@ func (w *BillingResetWorker) check(ctx context.Context) {
 	err := q.Find(&rooms).Error
 	if err != nil {
 		log.Printf("[billing-reset] query error: %v", err)
+		observability.CaptureException(err)
 		return
 	}
 
@@ -87,6 +89,7 @@ func (w *BillingResetWorker) check(ctx context.Context) {
 			Updates(map[string]interface{}{"has_paid": false, "paid_at": nil})
 		if result.Error != nil {
 			log.Printf("[billing-reset] error resetting room %s: %v", room.ID, result.Error)
+			observability.CaptureException(result.Error)
 			continue
 		}
 		if result.RowsAffected > 0 {

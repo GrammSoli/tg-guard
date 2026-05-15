@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/subguard/backend/internal/model"
+	"github.com/subguard/backend/internal/observability"
 )
 
 // premiumCheckInterval is how often the worker scans for lapsed Premium
@@ -63,6 +64,7 @@ func (w *PremiumWorker) check(ctx context.Context) {
 		Find(&expired).Error
 	if err != nil {
 		log.Printf("[premium-worker] query error: %v", err)
+		observability.CaptureException(err)
 		return
 	}
 	if len(expired) == 0 {
@@ -86,6 +88,7 @@ func (w *PremiumWorker) check(ctx context.Context) {
 			})
 		if res.Error != nil {
 			log.Printf("[premium-worker] downgrade user=%d error: %v", u.ID, res.Error)
+			observability.CaptureException(res.Error)
 			continue
 		}
 		if res.RowsAffected == 0 {
