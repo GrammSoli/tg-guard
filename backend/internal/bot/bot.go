@@ -854,56 +854,66 @@ func handleSuccessfulPayment(ctx context.Context, b *tgbot.Bot, update *models.U
 		return
 	}
 	payment := msg.SuccessfulPayment
-	log.Printf("[bot/payment] SuccessfulPayment charge=%s payload=%q amount=%d %s from_tg=%d",
-		payment.TelegramPaymentChargeID, payment.InvoicePayload,
+
+	// ── 📥 Entry point ──────────────────────────────────────────
+	log.Printf("📥 [bot/payment] Received SuccessfulPayment webhook. Payload: %q, ChargeID: %s, Amount: %d %s, From TG: %d",
+		payment.InvoicePayload, payment.TelegramPaymentChargeID,
 		payment.TotalAmount, payment.Currency, msg.From.ID)
 
 	// ── Step 1: Safe payload parsing ──────────────────────────
 	// Expected format: "premium_stars_<userID>"
 	if !strings.HasPrefix(payment.InvoicePayload, "premium_stars_") {
-		log.Printf("[bot/payment] unknown payload=%q, ignoring", payment.InvoicePayload)
+		log.Printf("❌ [bot/payment] Unknown payload prefix=%q, ignoring", payment.InvoicePayload)
 		return
 	}
 	parts := strings.Split(payment.InvoicePayload, "_")
+	log.Printf("🔍 [bot/payment] Payload split into %d parts: %v", len(parts), parts)
 	if len(parts) != 3 {
-		log.Printf("[bot/payment] malformed payload=%q (expected 3 parts, got %d)", payment.InvoicePayload, len(parts))
+		log.Printf("❌ [bot/payment] Malformed payload=%q (expected 3 parts, got %d)", payment.InvoicePayload, len(parts))
 		return
 	}
 	userID, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
-		log.Printf("[bot/payment] invalid user ID in payload=%q: %v", payment.InvoicePayload, err)
+		log.Printf("❌ [bot/payment] Failed to parse user ID from %q: %v", parts[2], err)
 		return
 	}
+	log.Printf("✅ [bot/payment] Parsed UserID: %d (uint64)", userID)
 
 	// ── Step 2: Idempotency — dedup by TelegramPaymentChargeID ──
 	chargeID := payment.TelegramPaymentChargeID
 	if chargeID == "" {
-		log.Printf("[bot/payment] empty charge ID, ignoring (should never happen)")
+		log.Printf("❌ [bot/payment] Empty charge ID, ignoring")
 		return
 	}
 	var existingDonation model.Donation
 	if err := db.WithContext(ctx).
 		Where("telegram_payment_charge_id = ?", chargeID).
 		First(&existingDonation).Error; err == nil {
-		// Already processed — Telegram retried the webhook.
-		log.Printf("[bot/payment] duplicate charge=%s for user=%d, skipping", chargeID, userID)
+		log.Printf("⚠️ [bot/payment] Duplicate charge=%s for user=%d, already processed — skipping", chargeID, userID)
 		return
 	}
+	log.Printf("🆕 [bot/payment] Charge %s is new, proceeding", chargeID)
 
 	// ── Step 3: Find user and activate premium ──────────────────
 	var user model.User
 	if err := db.WithContext(ctx).First(&user, "id = ?", uint(userID)).Error; err != nil {
-		log.Printf("[bot/payment] user=%d not found: %v", userID, err)
+		log.Printf("❌ [bot/payment] User with ID=%d (uint=%d) not found in DB: %v", userID, uint(userID), err)
 		return
 	}
+	log.Printf("👤 [bot/payment] Found user: ID=%d, TelegramID=%d, IsDonator=%v, Locale=%q",
+		user.ID, user.TelegramID, user.IsDonator, user.Locale)
 
-	// Activate premium + log donation in a single transaction.
+	// ── Step 4: DB update ───────────────────────────────────────
+	log.Printf("💽 [bot/payment] Attempting to update user %d to is_donator = true and create donation", user.ID)
+
 	txErr := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.User{}).
+		result := tx.Model(&model.User{}).
 			Where("id = ?", user.ID).
-			Update("is_donator", true).Error; err != nil {
-			return fmt.Errorf("set is_donator: %w", err)
+			Update("is_donator", true)
+		if result.Error != nil {
+			return fmt.Errorf("set is_donator: %w", result.Error)
 		}
+		log.Printf("💽 [bot/payment] UPDATE users SET is_donator=true WHERE id=%d — rows_affected=%d", user.ID, result.RowsAffected)
 
 		donation := model.Donation{
 			UserID:                  user.ID,
@@ -914,16 +924,17 @@ func handleSuccessfulPayment(ctx context.Context, b *tgbot.Bot, update *models.U
 		if err := tx.Create(&donation).Error; err != nil {
 			return fmt.Errorf("create donation: %w", err)
 		}
+		log.Printf("💽 [bot/payment] INSERT donation: id=%d, charge=%s", donation.ID, chargeID)
 		return nil
 	})
 	if txErr != nil {
-		log.Printf("[bot/payment] tx error for user=%d charge=%s: %v", user.ID, chargeID, txErr)
+		log.Printf("❌ [bot/payment] Transaction FAILED for user=%d charge=%s: %v", user.ID, chargeID, txErr)
 		return
 	}
-	log.Printf("[bot/payment] premium activated for user=%d charge=%s amount=%d",
+	log.Printf("🟢 [bot/payment] DB update successful. Premium activated for user=%d, charge=%s, amount=%d",
 		user.ID, chargeID, payment.TotalAmount)
 
-	// ── Step 4: Localized congratulation ────────────────────────
+	// ── Step 5: Localized congratulation ────────────────────────
 	locale := user.Locale
 	if locale == "" && msg.From != nil {
 		locale = msg.From.LanguageCode
@@ -936,11 +947,14 @@ func handleSuccessfulPayment(ctx context.Context, b *tgbot.Bot, update *models.U
 		text = "🎉 <b>Thank you for your purchase!</b>\n\nPremium is activated. Return to the app to enjoy all features!"
 	}
 
+	log.Printf("✉️ [bot/payment] Sending success message to chat=%d (locale=%q)", msg.Chat.ID, locale)
 	if _, err := b.SendMessage(ctx, &tgbot.SendMessageParams{
 		ChatID:    msg.Chat.ID,
 		Text:      text,
 		ParseMode: "HTML",
 	}); err != nil {
-		log.Printf("[bot/payment] congratulation send error for user=%d: %v", user.ID, err)
+		log.Printf("❌ [bot/payment] Congratulation send error for user=%d: %v", user.ID, err)
+	} else {
+		log.Printf("✅ [bot/payment] Congratulation sent successfully to user=%d", user.ID)
 	}
 }
