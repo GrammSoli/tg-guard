@@ -268,7 +268,18 @@ func main() {
 	app.Get("/api/v1/catalog", adminH.ListCatalog)
 
 	// ── Authenticated routes ───────────────────────────
-	auth := app.Group("/api/v1", middleware.AuthMiddleware(cfg.BotToken, db))
+	// MaintenanceGuard is the FIRST middleware in the group — it runs
+	// before AuthMiddleware on purpose. During a maintenance window we
+	// reject as early and cheaply as possible: no initData HMAC
+	// validation, no DB/Redis session work for a request we're going to
+	// 503 anyway. It also means a user with a stale token sees the same
+	// maintenance stub as everyone else, not a misleading "session
+	// expired". The guard skips /admin/ paths so admin endpoints stay
+	// reachable; /health and /webhook live outside this group entirely.
+	auth := app.Group("/api/v1",
+		middleware.MaintenanceGuard(db),
+		middleware.AuthMiddleware(cfg.BotToken, db),
+	)
 
 	// Per-user rate limit on authenticated mutations. The bare limiter
 	// (`max=120/min`) is intentionally generous — the goal is to stop
@@ -286,12 +297,6 @@ func main() {
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit"})
 		},
 	}))
-
-	// Maintenance kill-switch. 503s every non-admin /api request while
-	// AppSettings.maintenance_mode is on. Placed after auth+limiter so
-	// admin routes (which it skips by path) are still reachable and the
-	// switch can be flipped back off from the bot at any time.
-	auth.Use(middleware.MaintenanceGuard(db))
 
 	// User
 	userH := handler.NewUserHandler(cfg, db).WithNotifier(n).WithLifecycle(ctx, &workerWG)
