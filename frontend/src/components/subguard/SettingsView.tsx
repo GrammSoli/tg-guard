@@ -4,6 +4,7 @@ import { Bell, Check, ChevronRight, Globe, Lock, Sparkles, Wallet } from "lucide
 import { toast } from "sonner";
 import { SUPPORTED_CURRENCIES, currencySymbol } from "@/lib/currencyRates";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { usePaywallStore } from "@/stores/paywallStore";
 import { useTranslation } from "react-i18next";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/sheet";
 import { NotificationsSheet } from "./NotificationsSheet";
 import { PrivacySheet } from "./PrivacySheet";
+import { PremiumSheet } from "./PremiumSheet";
 import i18n from "@/lib/i18n";
 import { hapticImpact, hapticSelection } from "@/lib/telegram";
 
@@ -26,6 +28,7 @@ interface Props {
 export function SettingsView({ settings, user }: Props) {
   const updateSettings = useSettingsStore((s) => s.updateSettings);
   const storeUser = useSettingsStore((s) => s.user);
+  const paywallEnabled = usePaywallStore((s) => s.config.paywall_enabled);
   const { t } = useTranslation();
 
   const name = user?.name ?? storeUser?.name ?? "User";
@@ -42,12 +45,17 @@ export function SettingsView({ settings, user }: Props) {
   const [languageSheetOpen, setLanguageSheetOpen] = useState(false);
   const [notificationsSheetOpen, setNotificationsSheetOpen] = useState(false);
   const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
+  const [premiumSheetOpen, setPremiumSheetOpen] = useState(false);
 
-  // "Coming soon" handler — backend for these isn't ready yet, but the button
-  // shouldn't feel broken. One info toast with localized copy.
-  const comingSoon = () => {
+  // Pro features click: open PremiumSheet when paywall is live,
+  // otherwise show a "coming soon" toast.
+  const handleProClick = () => {
     hapticImpact("light");
-    toast.info(t("toast.comingSoon"));
+    if (paywallEnabled) {
+      setPremiumSheetOpen(true);
+    } else {
+      toast.info(t("toast.comingSoon"));
+    }
   };
 
   const openLanguageSheet = () => {
@@ -112,7 +120,7 @@ export function SettingsView({ settings, user }: Props) {
       Icon: Sparkles,
       label: t("settings.pro"),
       hint: isPremium ? t("settings.proActive") : t("settings.proUpgrade"),
-      onClick: comingSoon,
+      onClick: handleProClick,
     },
   ];
 
@@ -249,6 +257,9 @@ export function SettingsView({ settings, user }: Props) {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Premium upgrade sheet */}
+      <PremiumSheet open={premiumSheetOpen} onClose={() => setPremiumSheetOpen(false)} />
     </div>
   );
 }
