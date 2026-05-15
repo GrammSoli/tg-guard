@@ -267,6 +267,21 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	case data == "admin_toggle_paywall":
 		p.handlePaywallToggle(ctx, b, chatID, msgID)
 
+	case data == "admin:noop":
+		// label-only button, already acked above
+
+	case data == "admin:subs_inc":
+		p.handleLimitChange(ctx, b, chatID, msgID, "subs", 1)
+
+	case data == "admin:subs_dec":
+		p.handleLimitChange(ctx, b, chatID, msgID, "subs", -1)
+
+	case data == "admin:rooms_inc":
+		p.handleLimitChange(ctx, b, chatID, msgID, "rooms", 1)
+
+	case data == "admin:rooms_dec":
+		p.handleLimitChange(ctx, b, chatID, msgID, "rooms", -1)
+
 	case strings.HasPrefix(data, "admin_bc_lang_"):
 		p.broadcast.handleBroadcastLang(ctx, b, cb.From.ID, data, chatID, msgID)
 
@@ -886,6 +901,16 @@ func (p *adminPanel) handleSettingsMenu(ctx context.Context, b *tgbot.Bot, chatI
 	kb := models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{
 			{{Text: "Переключить Пейвол 🔄", CallbackData: "admin_toggle_paywall"}},
+			{
+				{Text: "➖", CallbackData: "admin:subs_dec"},
+				{Text: fmt.Sprintf("📝 Подписки: %d", settings.FreeSubsLimit), CallbackData: "admin:noop"},
+				{Text: "➕", CallbackData: "admin:subs_inc"},
+			},
+			{
+				{Text: "➖", CallbackData: "admin:rooms_dec"},
+				{Text: fmt.Sprintf("📝 Комнаты: %d", settings.FreeRoomLimit), CallbackData: "admin:noop"},
+				{Text: "➕", CallbackData: "admin:rooms_inc"},
+			},
 			{{Text: "🔙 Назад", CallbackData: "admin_back"}},
 		},
 	}
@@ -913,6 +938,36 @@ func (p *adminPanel) handlePaywallToggle(ctx context.Context, b *tgbot.Bot, chat
 	}
 
 	// Re-render the settings menu with updated status
+	p.handleSettingsMenu(ctx, b, chatID, msgID)
+}
+
+// handleLimitChange adjusts free_subs_limit or free_room_limit by delta
+// (typically +1 or -1) and re-renders the settings menu.
+func (p *adminPanel) handleLimitChange(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int, resource string, delta int) {
+	settings, err := p.repo.GetSettings()
+	if err != nil {
+		log.Printf("[admin] limit change: load error: %v", err)
+		return
+	}
+
+	switch resource {
+	case "subs":
+		settings.FreeSubsLimit += delta
+		if settings.FreeSubsLimit < 0 {
+			settings.FreeSubsLimit = 0
+		}
+	case "rooms":
+		settings.FreeRoomLimit += delta
+		if settings.FreeRoomLimit < 0 {
+			settings.FreeRoomLimit = 0
+		}
+	}
+
+	if err := p.repo.UpdateSettings(settings); err != nil {
+		log.Printf("[admin] limit change: save error: %v", err)
+		return
+	}
+
 	p.handleSettingsMenu(ctx, b, chatID, msgID)
 }
 
