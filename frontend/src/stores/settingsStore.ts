@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import * as Sentry from "@sentry/react";
 import type { UserSettings } from "@/types/subscription";
 import { api, ApiError } from "@/lib/api";
 
@@ -49,6 +50,18 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const locale = me.locale ?? "en";
       import("@/lib/i18n").then(({ default: i18n }) => {
         i18n.changeLanguage(locale);
+      });
+
+      // Attach identity to every Sentry event for the rest of the
+      // session. Set once here on profile load — Sentry keeps the user
+      // on the global scope, so a later 5xx or render crash is already
+      // tagged with "who". No-op when VITE_SENTRY_DSN is unset. ID is
+      // the internal user_id (stable); username + telegram_id make the
+      // dashboard searchable by "@Ivanov".
+      Sentry.setUser({
+        id: String(me.id),
+        username: me.username || undefined,
+        telegram_id: me.telegram_id,
       });
 
       set({

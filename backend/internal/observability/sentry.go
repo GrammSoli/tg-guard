@@ -11,10 +11,41 @@ import (
 	"context"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 )
+
+// UserInfo carries the identity attached to a captured event so triage
+// can answer "which user hit this?". Built from primitives — this
+// package deliberately doesn't import internal/model, keeping its
+// dependency surface (and the worker packages that import it) thin.
+//
+// A nil *UserInfo means "no user context" — used for worker panics and
+// unauthenticated request failures.
+type UserInfo struct {
+	InternalID uint   // our users.id
+	TelegramID int64  // Telegram user id
+	Username   string // Telegram @username, may be empty
+}
+
+// sentryUser converts a UserInfo into the SDK's user struct. The
+// internal id is the primary key (stable, never changes); the Telegram
+// id + username land in Data so the dashboard search can find
+// "@Ivanov" directly.
+func sentryUser(u *UserInfo) sentry.User {
+	if u == nil {
+		return sentry.User{}
+	}
+	return sentry.User{
+		ID:       strconv.FormatUint(uint64(u.InternalID), 10),
+		Username: u.Username,
+		Data: map[string]string{
+			"telegram_id": strconv.FormatInt(u.TelegramID, 10),
+		},
+	}
+}
 
 // flushTimeout bounds how long Flush blocks while draining the event
 // buffer — on shutdown and after a panic we don't want to hang the
@@ -92,7 +123,11 @@ func CaptureException(err error) {
 // CaptureHTTPError reports a 5xx response. Method/path are passed as
 // primitives so this package never imports the web framework — keeps
 // the dependency graph (and the worker packages that import this) thin.
-func CaptureHTTPError(method, path string, status int, err error) {
+//
+// user, when non-nil, is attached to the event so triage can see which
+// user hit the failure. Per-event (not a global hub user) because the
+// backend is multi-tenant — concurrent requests carry different users.
+func CaptureHTTPError(method, path string, status int, user *UserInfo, err error) {
 	if err == nil {
 		return
 	}
@@ -105,16 +140,30 @@ func CaptureHTTPError(method, path string, status int, err error) {
 			"path":        path,
 			"status_code": status,
 		})
+		if user != nil {
+			scope.SetUser(sentryUser(user))
+		}
 		sentry.CaptureException(err)
 	})
 }
 
 // CapturePanic reports a recovered panic with its captured stack. Used
-// by workerutil.Supervise (via the PanicHook indirection) and the Fiber
-// recover middleware. It Flushes synchronously because a panic often
-// precedes a restart or crash and we can't rely on the deferred Init
-// flush running in time.
+// by workerutil.Supervise (via the PanicHook indirection) — worker
+// panics have no user context. It Flushes synchronously because a panic
+// often precedes a restart or crash and we can't rely on the deferred
+// Init flush running in time.
 func CapturePanic(source string, recovered interface{}, stack []byte) {
+	capturePanic(source, nil, recovered, stack)
+}
+
+// CapturePanicWithUser is the HTTP variant — used by the Fiber recover
+// middleware, which can pull the authenticated user out of the request
+// context and attach it to the panic event.
+func CapturePanicWithUser(source string, user *UserInfo, recovered interface{}, stack []byte) {
+	capturePanic(source, user, recovered, stack)
+}
+
+func capturePanic(source string, user *UserInfo, recovered interface{}, stack []byte) {
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("panic.source", source)
 		scope.SetLevel(sentry.LevelFatal)
@@ -122,6 +171,9 @@ func CapturePanic(source string, recovered interface{}, stack []byte) {
 			scope.SetContext("panic", map[string]interface{}{
 				"stacktrace": string(stack),
 			})
+		}
+		if user != nil {
+			scope.SetUser(sentryUser(user))
 		}
 		sentry.CurrentHub().Recover(recovered)
 	})
