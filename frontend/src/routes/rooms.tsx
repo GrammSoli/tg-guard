@@ -5,10 +5,12 @@ import { ArrowLeft, ArrowUpDown, Plus, Search, Users, X } from "lucide-react";
 import { useRoomStore } from "@/stores/roomStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModalStore } from "@/stores/modalStore";
+import { usePaywallStore } from "@/stores/paywallStore";
 import { formatCurrency, localeFor } from "@/lib/format";
 import { convertCurrency } from "@/lib/currencyRates";
 import { SwipeableRoomCard } from "@/components/subguard/SwipeableRoomCard";
-import { hapticImpact } from "@/lib/telegram";
+import { PremiumSheet } from "@/components/subguard/PremiumSheet";
+import { hapticImpact, hapticNotification } from "@/lib/telegram";
 
 export const Route = createFileRoute("/rooms")({
   component: RoomsPage,
@@ -32,9 +34,11 @@ function RoomsPage() {
   const { settings } = useSettingsStore();
   const openRoom = useModalStore((s) => s.openRoom);
   const openCreateRoom = useModalStore((s) => s.openCreateRoom);
+  const paywallConfig = usePaywallStore((s) => s.config);
   const userCurrency = settings.defaultCurrency;
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
+  const [premiumOpen, setPremiumOpen] = useState(false);
   const [sort, setSort] = useState<SortKey>(() => {
     if (typeof window === "undefined") return "name";
     const stored = window.localStorage.getItem(SORT_STORAGE_KEY);
@@ -88,7 +92,12 @@ function RoomsPage() {
         <button
           onClick={() => {
             hapticImpact("medium");
-            openCreateRoom();
+            if (paywallConfig.paywall_enabled && !settings.isSubscribed && rooms.length >= paywallConfig.free_room_limit) {
+              setPremiumOpen(true);
+              hapticNotification("warning");
+            } else {
+              openCreateRoom();
+            }
           }}
           className="bg-primary/15 hover:bg-primary/25 flex h-9 w-9 items-center justify-center rounded-full text-primary transition-colors"
           aria-label="Create room"
@@ -197,6 +206,7 @@ function RoomsPage() {
       <Link to="/" className="sr-only">
         Home
       </Link>
+      <PremiumSheet open={premiumOpen} onClose={() => setPremiumOpen(false)} />
     </div>
   );
 }

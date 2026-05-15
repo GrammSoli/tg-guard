@@ -207,7 +207,24 @@ func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 			"recommendations_enabled": s.RecommendationsEnabled,
 			"channel_gate_enabled":    s.ChannelGateEnabled,
 			"target_channel":          s.TargetChannel,
+			"paywall_enabled":         s.PaywallEnabled,
+			"free_subs_limit":         s.FreeSubsLimit,
+			"free_room_limit":         s.FreeRoomLimit,
 		}).Error
+}
+
+// CountUserSubscriptions returns the number of subscriptions for a user.
+func (r *AdminRepo) CountUserSubscriptions(userID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.Subscription{}).Where("user_id = ?", userID).Count(&count).Error
+	return count, err
+}
+
+// CountUserOwnedRooms returns the number of rooms a user owns.
+func (r *AdminRepo) CountUserOwnedRooms(userID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.SharedRoom{}).Where("owner_id = ?", userID).Count(&count).Error
+	return count, err
 }
 
 // ── User Management ────────────────────────────────────

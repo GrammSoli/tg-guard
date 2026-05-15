@@ -14,14 +14,16 @@ import (
 
 // SubscriptionHandler handles subscription CRUD.
 type SubscriptionHandler struct {
-	repo *repository.SubscriptionRepo
-	db   *gorm.DB
+	repo      *repository.SubscriptionRepo
+	adminRepo *repository.AdminRepo
+	db        *gorm.DB
 }
 
 func NewSubscriptionHandler(db *gorm.DB) *SubscriptionHandler {
 	return &SubscriptionHandler{
-		repo: repository.NewSubscriptionRepo(db),
-		db:   db,
+		repo:      repository.NewSubscriptionRepo(db),
+		adminRepo: repository.NewAdminRepo(db),
+		db:        db,
 	}
 }
 
@@ -47,6 +49,21 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 	user := middleware.UserFromCtx(c)
 	if user == nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	// ── Paywall enforcement ────────────────────────────
+	if !user.IsDonator {
+		settings, err := h.adminRepo.GetSettings()
+		if err == nil && settings.PaywallEnabled {
+			count, cerr := h.adminRepo.CountUserSubscriptions(user.ID)
+			if cerr == nil && count >= int64(settings.FreeSubsLimit) {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+					"error": "paywall_limit",
+					"limit": settings.FreeSubsLimit,
+					"count": count,
+				})
+			}
+		}
 	}
 
 	var body struct {

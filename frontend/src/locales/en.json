@@ -283,5 +283,13 @@
   "room.customService": "Custom service",
   "room.customServiceHint": "Add a custom payment or service",
   "room.noteRequired": "Note required to distinguish duplicates",
-  "room.noteRequiredPh": "e.g. For parents"
+  "room.noteRequiredPh": "e.g. For parents",
+  "premium.title": "Upgrade to Premium",
+  "premium.description": "Unlock the full power of SubGuard with unlimited tracking and sharing.",
+  "premium.unlimitedSubs": "Unlimited Subscriptions",
+  "premium.unlimitedSubsHint": "Track as many services as you need without limits.",
+  "premium.unlimitedRooms": "Unlimited Rooms",
+  "premium.unlimitedRoomsHint": "Create unlimited shared rooms and split costs freely.",
+  "premium.upgrade": "Upgrade Now",
+  "premium.later": "Maybe later"
 }
