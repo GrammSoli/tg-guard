@@ -302,6 +302,26 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 		return
 	}
 
+	// Maintenance gate — keep the bot's text replies in sync with the
+	// API's MaintenanceGuard and the WebApp stub. Admins bypass it so
+	// they can still reach /start and /admin to flip the switch back
+	// off. Placed before deep-link parsing so a room-invite or ad-link
+	// /start during a window also gets the stub, not the join flow.
+	if !cfg.IsAdmin(tgUser.ID) {
+		if s, settErr := adminRepo.GetSettings(); settErr == nil && s.MaintenanceMode {
+			locale := "en"
+			if user.Locale == "ru" || strings.HasPrefix(tgUser.LanguageCode, "ru") {
+				locale = "ru"
+			}
+			b.SendMessage(ctx, &tgbot.SendMessageParams{
+				ChatID:    chatID,
+				Text:      maintenanceMessage(locale),
+				ParseMode: "HTML",
+			})
+			return
+		}
+	}
+
 	// Parse deep link parameters: /start room_ABC123 or /start ad_campaign_tag
 	parts := strings.SplitN(update.Message.Text, " ", 2)
 	if len(parts) == 2 {
@@ -352,6 +372,17 @@ func handleStart(ctx context.Context, b *tgbot.Bot, update *models.Update, cfg *
 			}},
 		},
 	})
+}
+
+// maintenanceMessage is the localized "under maintenance" reply the bot
+// sends non-admin users for /start while AppSettings.maintenance_mode is
+// on — keeps the bot's text surface in sync with the API MaintenanceGuard
+// and the WebApp's MaintenanceScreen. HTML parse mode (the <b> tag).
+func maintenanceMessage(locale string) string {
+	if locale == "ru" {
+		return "🛠 <b>Технические работы</b>\n\nПрикручиваем новые фичи, скоро вернёмся ☕️"
+	}
+	return "🛠 <b>Under maintenance</b>\n\nBolting on new features — back in a moment ☕️"
 }
 
 // handleRenewCallback processes the inline "Paid (Renew)" button attached
