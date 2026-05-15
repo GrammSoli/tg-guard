@@ -296,6 +296,12 @@
   "premium.payment_failed": "Failed to create payment",
   "premium.crypto_pay": "Pay with Crypto",
   "premium.crypto_processing": "Payment is processing. Premium will activate automatically once confirmed.",
+  "premium.already_active_title": "Premium Active 👑",
+  "premium.already_active_desc": "Thank you for your support! All limits are removed, enjoy the premium features.",
+  "premium.close": "Close",
+  "premium.payStars": "Pay ⭐️ {{price}}",
+  "premium.payCrypto": "Pay with crypto • ${{price}}",
+  "premium.processing": "Processing...",
   "maintenance.title": "Maintenance Break",
   "maintenance.subtitle": "We are adding new features, we'll be right back ☕️"
 }

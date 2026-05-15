@@ -20,11 +20,14 @@ interface PremiumSheetProps {
 }
 
 /**
- * Premium upgrade bottom-sheet. Shown when a free-tier user hits a paywall
- * limit (e.g. max subscriptions or max rooms). Offers two payment methods:
+ * Premium upgrade bottom-sheet. Two states:
  *
- * 1. Telegram Stars — native in-app payment via openInvoice()
- * 2. Crypto Pay (@CryptoBot) — opens t.me/CryptoBot link via openTelegramLink()
+ *  - Already a donator → a confirmation screen (crown, thank-you copy,
+ *    a single Close button). No feature cards, no payment buttons.
+ *  - Free user → the upgrade screen: feature cards + two payment
+ *    buttons. Telegram Stars is the primary CTA (amber gradient);
+ *    Crypto Pay is the secondary, quieter outline button so the two
+ *    don't fight for attention.
  *
  * Pricing is locale-split and admin-configurable: the prices come from
  * the paywall config (GET /api/v1/config) and the pair shown is picked
@@ -34,6 +37,8 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
   const { t, i18n } = useTranslation();
   const config = usePaywallStore((s) => s.config);
   const fetchProfile = useSettingsStore((s) => s.fetchProfile);
+  // is_donator from /me — settingsStore maps it onto settings.isSubscribed.
+  const isDonator = useSettingsStore((s) => s.settings.isSubscribed);
   const [loadingStars, setLoadingStars] = useState(false);
   const [loadingCrypto, setLoadingCrypto] = useState(false);
 
@@ -102,84 +107,104 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
   return (
     <Drawer open={open} onOpenChange={(v) => !v && onClose()}>
       <DrawerContent>
-        <DrawerHeader className="text-center">
-          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-amber-400/20 to-orange-500/20">
-            <Crown className="h-8 w-8 text-amber-400" />
-          </div>
-          <DrawerTitle className="text-xl">
-            {t("premium.title")}
-          </DrawerTitle>
-          <DrawerDescription className="mt-1">
-            {t("premium.description")}
-          </DrawerDescription>
-        </DrawerHeader>
+        {isDonator ? (
+          // ── Already-active state ────────────────────────────
+          <>
+            <DrawerHeader className="text-center">
+              <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-amber-400/20 to-orange-500/20">
+                <Crown className="h-8 w-8 text-amber-400" />
+              </div>
+              <DrawerTitle className="text-xl">
+                {t("premium.already_active_title")}
+              </DrawerTitle>
+              <DrawerDescription className="mt-1">
+                {t("premium.already_active_desc")}
+              </DrawerDescription>
+            </DrawerHeader>
 
-        <div className="space-y-3 px-6">
-          <div className="flex items-start gap-3 rounded-xl bg-surface p-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15">
-              <Sparkles className="h-4 w-4 text-primary" />
+            <DrawerFooter>
+              <button
+                onClick={onClose}
+                className="w-full rounded-full bg-primary px-6 py-3 text-sm font-bold text-primary-foreground shadow-lg transition-transform active:scale-[0.97]"
+              >
+                {t("premium.close")}
+              </button>
+            </DrawerFooter>
+          </>
+        ) : (
+          // ── Upgrade state ───────────────────────────────────
+          <>
+            <DrawerHeader className="text-center">
+              <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-amber-400/20 to-orange-500/20">
+                <Crown className="h-8 w-8 text-amber-400" />
+              </div>
+              <DrawerTitle className="text-xl">
+                {t("premium.title")}
+              </DrawerTitle>
+              <DrawerDescription className="mt-1">
+                {t("premium.description")}
+              </DrawerDescription>
+            </DrawerHeader>
+
+            <div className="space-y-3 px-6">
+              <div className="flex items-start gap-3 rounded-xl bg-surface p-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">{t("premium.unlimitedSubs")}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("premium.unlimitedSubsHint")}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 rounded-xl bg-surface p-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15">
+                  <Zap className="h-4 w-4 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">{t("premium.unlimitedRooms")}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("premium.unlimitedRoomsHint")}
+                  </p>
+                </div>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-semibold">{t("premium.unlimitedSubs")}</p>
-              <p className="text-xs text-muted-foreground">
-                {t("premium.unlimitedSubsHint")}
-              </p>
-            </div>
-          </div>
 
-          <div className="flex items-start gap-3 rounded-xl bg-surface p-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15">
-              <Zap className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold">{t("premium.unlimitedRooms")}</p>
-              <p className="text-xs text-muted-foreground">
-                {t("premium.unlimitedRoomsHint")}
-              </p>
-            </div>
-          </div>
-        </div>
+            <DrawerFooter className="gap-3">
+              {/* Primary CTA — Telegram Stars. */}
+              <button
+                onClick={handleStars}
+                disabled={loading}
+                className="w-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-6 py-3 text-sm font-bold text-black shadow-lg transition-transform active:scale-[0.97] disabled:opacity-60"
+              >
+                {loadingStars
+                  ? t("premium.processing")
+                  : t("premium.payStars", { price: starsPrice })}
+              </button>
 
-        {/* Locale-split Premium price, sourced from /config — never
-            hardcoded. Shows both payment options the bot supports. */}
-        <div className="px-6 pt-4">
-          <div className="flex items-center justify-center gap-3 rounded-xl bg-surface p-3 text-sm font-semibold">
-            <span>⭐ {starsPrice} Stars</span>
-            <span className="text-muted-foreground">·</span>
-            <span>💵 ${cryptoPrice}</span>
-          </div>
-        </div>
+              {/* Secondary — Crypto Pay. Quieter outline so it doesn't
+                  compete with the Stars CTA above. */}
+              <button
+                onClick={handleCrypto}
+                disabled={loading}
+                className="w-full rounded-full border border-input bg-transparent px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-accent active:scale-[0.97] disabled:opacity-60"
+              >
+                {loadingCrypto
+                  ? t("premium.processing")
+                  : t("premium.payCrypto", { price: cryptoPrice })}
+              </button>
 
-        <DrawerFooter>
-          {/* Stars button */}
-          <button
-            onClick={handleStars}
-            disabled={loading}
-            className="w-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-6 py-3 text-sm font-bold text-black shadow-lg transition-transform active:scale-[0.97] disabled:opacity-60"
-          >
-            {loadingStars
-              ? (isRu ? "Обработка..." : "Processing...")
-              : `${t("premium.upgrade")} · ⭐ ${starsPrice}`}
-          </button>
-
-          {/* Crypto button */}
-          <button
-            onClick={handleCrypto}
-            disabled={loading}
-            className="w-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 px-6 py-3 text-sm font-bold text-white shadow-lg transition-transform active:scale-[0.97] disabled:opacity-60"
-          >
-            {loadingCrypto
-              ? (isRu ? "Обработка..." : "Processing...")
-              : `💎 ${t("premium.crypto_pay")} · $${cryptoPrice}`}
-          </button>
-
-          <button
-            onClick={onClose}
-            className="w-full rounded-full px-6 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {t("premium.later")}
-          </button>
-        </DrawerFooter>
+              <button
+                onClick={onClose}
+                className="w-full rounded-full px-6 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {t("premium.later")}
+              </button>
+            </DrawerFooter>
+          </>
+        )}
       </DrawerContent>
     </Drawer>
   );

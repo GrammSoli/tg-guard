@@ -297,6 +297,12 @@
   "premium.payment_failed": "Не удалось создать платёж",
   "premium.crypto_pay": "Оплатить криптой",
   "premium.crypto_processing": "Оплата в обработке. После подтверждения Premium активируется автоматически.",
+  "premium.already_active_title": "Premium Активен 👑",
+  "premium.already_active_desc": "Спасибо за поддержку! Все лимиты сняты, вам доступны все премиум-функции.",
+  "premium.close": "Закрыть",
+  "premium.payStars": "Оплатить ⭐️ {{price}}",
+  "premium.payCrypto": "Оплатить криптой • ${{price}}",
+  "premium.processing": "Обработка...",
   "maintenance.title": "Технические работы",
   "maintenance.subtitle": "Прикручиваем новые фичи, скоро вернёмся ☕️"
 }
