@@ -271,6 +271,10 @@ func main() {
 		app.Post("/webhook", webhookHandler.Handle)
 	}
 
+	// ── Crypto Pay webhook (no auth, HMAC-SHA256 verified inside) ──
+	cryptoWebhookH := handler.NewPaymentHandler(db, cfg, tgBot)
+	app.Post("/webhook/crypto", cryptoWebhookH.HandleCryptoWebhook)
+
 	// ── Public catalog (no auth needed) ────────────────
 	adminH := handler.NewAdminHandler(db, cfg, tgBot, ctx)
 	app.Get("/api/v1/catalog", adminH.ListCatalog)
@@ -313,11 +317,12 @@ func main() {
 	auth.Get("/me/export", userH.ExportMe)
 	auth.Delete("/me", userH.DeleteMe)
 
-	// Payments (Stars)
+	// Payments (Stars + Crypto)
+	paymentH := handler.NewPaymentHandler(db, cfg, tgBot)
 	if tgBot != nil {
-		paymentH := handler.NewPaymentHandler(db, cfg, tgBot)
 		auth.Post("/payments/stars", paymentH.CreateStarsInvoice)
 	}
+	auth.Post("/payments/crypto", paymentH.CreateCryptoInvoice)
 
 	// Public config (paywall limits — available to all authenticated users)
 	auth.Get("/config", adminH.GetPublicConfig)

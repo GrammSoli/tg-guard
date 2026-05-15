@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Crown, Sparkles, Zap, X } from "lucide-react";
+import { Crown, Sparkles, Zap } from "lucide-react";
 import {
   Drawer,
   DrawerContent,
@@ -9,7 +9,7 @@ import {
   DrawerDescription,
   DrawerFooter,
 } from "@/components/ui/drawer";
-import { hapticImpact, hapticNotification, openInvoice } from "@/lib/telegram";
+import { hapticImpact, hapticNotification, openInvoice, openTelegramLink } from "@/lib/telegram";
 import { usePaywallStore } from "@/stores/paywallStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { api } from "@/lib/api";
@@ -21,9 +21,10 @@ interface PremiumSheetProps {
 
 /**
  * Premium upgrade bottom-sheet. Shown when a free-tier user hits a paywall
- * limit (e.g. max subscriptions or max rooms). The "Upgrade" CTA calls
- * POST /api/v1/payments/stars to generate a Stars invoice link and opens
- * it via Telegram.WebApp.openInvoice().
+ * limit (e.g. max subscriptions or max rooms). Offers two payment methods:
+ *
+ * 1. Telegram Stars — native in-app payment via openInvoice()
+ * 2. Crypto Pay (@CryptoBot) — opens t.me/CryptoBot link via openTelegramLink()
  *
  * Pricing is locale-split and admin-configurable: the prices come from
  * the paywall config (GET /api/v1/config) and the pair shown is picked
@@ -33,49 +34,70 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
   const { t, i18n } = useTranslation();
   const config = usePaywallStore((s) => s.config);
   const fetchProfile = useSettingsStore((s) => s.fetchProfile);
-  const [loading, setLoading] = useState(false);
+  const [loadingStars, setLoadingStars] = useState(false);
+  const [loadingCrypto, setLoadingCrypto] = useState(false);
 
-  // i18n.language is exactly "ru" | "en" (set in lib/i18n.ts); startsWith
-  // guards against a regional tag ever slipping in.
   const isRu = i18n.language.startsWith("ru");
   const starsPrice = isRu ? config.price_stars_ru : config.price_stars_en;
   const cryptoPrice = isRu ? config.price_crypto_usd_ru : config.price_crypto_usd_en;
 
-  const handleUpgrade = async () => {
+  // ── Stars payment flow ────────────────────────────────────
+  const handleStars = async () => {
     hapticImpact("medium");
-    setLoading(true);
+    setLoadingStars(true);
 
     try {
-      // Step 1: Generate invoice link via backend
       const { invoice_url } = await api<{ invoice_url: string }>(
         "/payments/stars",
         { method: "POST" },
       );
 
-      // Step 2: Open Telegram's native payment sheet
       const status = await openInvoice(invoice_url);
 
-      // Step 3: Handle result
       if (status === "paid") {
         hapticNotification("success");
-        // Re-fetch profile to pick up is_donator = true. The GET /me
-        // endpoint uses no caching (plain fetch) so this always gets
-        // the fresh DB state.
         await fetchProfile();
         const { toast } = await import("sonner");
         toast.success(t("premium.success_toast"));
         onClose();
       }
-      // "cancelled" / "pending" / "failed" — just close the loading state,
-      // the user can retry.
     } catch (err) {
-      console.error("[PremiumSheet] payment error:", err);
+      console.error("[PremiumSheet] stars error:", err);
       const { toast } = await import("sonner");
       toast.error(t("premium.payment_failed"));
     } finally {
-      setLoading(false);
+      setLoadingStars(false);
     }
   };
+
+  // ── Crypto Pay flow ───────────────────────────────────────
+  const handleCrypto = async () => {
+    hapticImpact("medium");
+    setLoadingCrypto(true);
+
+    try {
+      const { invoice_url } = await api<{ invoice_url: string }>(
+        "/payments/crypto",
+        { method: "POST" },
+      );
+
+      // Open the CryptoBot link inside Telegram. The webhook will
+      // activate premium on the backend; user will get a TG message.
+      openTelegramLink(invoice_url);
+
+      const { toast } = await import("sonner");
+      toast.info(t("premium.crypto_processing"));
+      onClose();
+    } catch (err) {
+      console.error("[PremiumSheet] crypto error:", err);
+      const { toast } = await import("sonner");
+      toast.error(t("premium.payment_failed"));
+    } finally {
+      setLoadingCrypto(false);
+    }
+  };
+
+  const loading = loadingStars || loadingCrypto;
 
   return (
     <Drawer open={open} onOpenChange={(v) => !v && onClose()}>
@@ -129,15 +151,28 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
         </div>
 
         <DrawerFooter>
+          {/* Stars button */}
           <button
-            onClick={handleUpgrade}
+            onClick={handleStars}
             disabled={loading}
             className="w-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-6 py-3 text-sm font-bold text-black shadow-lg transition-transform active:scale-[0.97] disabled:opacity-60"
           >
-            {loading
+            {loadingStars
               ? (isRu ? "Обработка..." : "Processing...")
               : `${t("premium.upgrade")} · ⭐ ${starsPrice}`}
           </button>
+
+          {/* Crypto button */}
+          <button
+            onClick={handleCrypto}
+            disabled={loading}
+            className="w-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 px-6 py-3 text-sm font-bold text-white shadow-lg transition-transform active:scale-[0.97] disabled:opacity-60"
+          >
+            {loadingCrypto
+              ? (isRu ? "Обработка..." : "Processing...")
+              : `💎 ${t("premium.crypto_pay")} · $${cryptoPrice}`}
+          </button>
+
           <button
             onClick={onClose}
             className="w-full rounded-full px-6 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"

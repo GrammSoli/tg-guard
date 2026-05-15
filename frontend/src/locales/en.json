@@ -294,6 +294,8 @@
   "premium.later": "Maybe later",
   "premium.success_toast": "Premium activated!",
   "premium.payment_failed": "Failed to create payment",
+  "premium.crypto_pay": "Pay with Crypto",
+  "premium.crypto_processing": "Payment is processing. Premium will activate automatically once confirmed.",
   "maintenance.title": "Maintenance Break",
   "maintenance.subtitle": "We are adding new features, we'll be right back ☕️"
 }

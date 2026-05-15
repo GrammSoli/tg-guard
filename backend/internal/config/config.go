@@ -13,6 +13,7 @@ type Config struct {
 	BotToken         string
 	AdminTelegramIDs []int64
 	WebhookSecret    string
+	CryptoPayToken   string
 
 	// Database
 	DatabaseURL string
@@ -30,6 +31,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		BotToken:      os.Getenv("BOT_TOKEN"),
 		WebhookSecret: os.Getenv("WEBHOOK_SECRET"),
+		CryptoPayToken: os.Getenv("CRYPTO_PAY_TOKEN"),
 		DatabaseURL:   os.Getenv("DATABASE_URL"),
 		RedisURL:      os.Getenv("REDIS_URL"),
 		APIPort:       os.Getenv("API_PORT"),

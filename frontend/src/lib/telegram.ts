@@ -139,6 +139,25 @@ export function openExternalLink(url: string) {
   }
 }
 
+/**
+ * openTelegramLink — open a t.me/... link inside Telegram.
+ * Used for Crypto Pay (@CryptoBot) invoice links which are t.me/CryptoBot
+ * URLs. Unlike openExternalLink, this keeps the user inside Telegram.
+ */
+export function openTelegramLink(url: string) {
+  try {
+    const fn = tg()?.openTelegramLink as ((u: string) => void) | undefined;
+    if (fn) {
+      fn(url);
+      return;
+    }
+  } catch { /* noop */ }
+  // Fallback for non-TMA contexts
+  if (typeof window !== "undefined") {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
 // ─── User Info ─────────────────────────────────────────────────
 
 export interface TelegramUser {
