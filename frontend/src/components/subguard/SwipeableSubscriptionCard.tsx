@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { memo, useState, useCallback } from "react";
 import { Trash2 } from "lucide-react";
 import type { Subscription } from "@/types/subscription";
 import { SubscriptionCard } from "./SubscriptionCard";
@@ -22,7 +22,17 @@ interface Props {
   onDelete?: (id: string) => void;
 }
 
-export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: Props) {
+// React.memo wrap: rendered in a .map() of all the user's subs. Dashboard
+// re-renders on every search keystroke and every store update — without
+// memo, every keystroke re-renders every swipe wrapper + every card
+// underneath. Props are stable references (parent uses useCallback for
+// onClick/onDelete), so shallow compare correctly short-circuits.
+// See audit F5.
+export const SwipeableSubscriptionCard = memo(function SwipeableSubscriptionCard({
+  subscription,
+  onClick,
+  onDelete,
+}: Props) {
   const { t } = useTranslation();
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -125,4 +135,4 @@ export function SwipeableSubscriptionCard({ subscription, onClick, onDelete }: P
       </AlertDialog>
     </>
   );
-}
+});

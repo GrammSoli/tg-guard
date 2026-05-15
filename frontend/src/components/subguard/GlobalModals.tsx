@@ -29,12 +29,19 @@ export function GlobalModals() {
   const updateSubscription = useSubscriptionStore((s) => s.updateSubscription);
   const deleteSubscription = useSubscriptionStore((s) => s.deleteSubscription);
 
-  // Auto-fetch room detail when a room is opened.
+  // Auto-fetch on open, drop the cached detail on close so closed-sheet
+  // memory doesn't accumulate across a session (audit F6). The
+  // activeDetail object can hold ~5-20 KB of members + services per
+  // room; clearing it keeps RSS flat over 10+ sheet open/close cycles.
   // fetchDetail is a Zustand action — stable ref, listing it in deps
-  // just risks HMR double-fires.
+  // would just risk HMR double-fires.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (activeRoomId) fetchDetail(activeRoomId);
+    if (activeRoomId) {
+      fetchDetail(activeRoomId);
+    } else {
+      useRoomStore.setState({ activeDetail: null });
+    }
   }, [activeRoomId]);
 
   const handleSave = async (data: Omit<Subscription, "id"> & { id?: string }) => {

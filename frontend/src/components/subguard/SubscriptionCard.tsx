@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { formatCurrency, formatDate, localeFor } from "@/lib/format";
 import { convertCurrency } from "@/lib/currencyRates";
 import { useTranslation } from "react-i18next";
@@ -12,13 +13,25 @@ interface Props {
   onClick?: (s: Subscription) => void;
 }
 
-export function SubscriptionCard({ subscription, onClick }: Props) {
+// Wrapped in React.memo because this card lives inside a .map() of 20-100
+// items on the dashboard. Without memoization, every Dashboard re-render
+// (search keystroke, filter change, any store update) re-renders every
+// card. The props (subscription object + onClick callback) are stable
+// references from the parent's useMemo / useCallback path, so shallow
+// compare correctly short-circuits when nothing changed. See audit F5.
+export const SubscriptionCard = memo(function SubscriptionCard({
+  subscription,
+  onClick,
+}: Props) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const s = subscription;
   const lc = localeFor(locale);
-  const { settings } = useSettingsStore();
-  const userCurrency = settings.defaultCurrency;
+  // Granular selector — was destructuring the whole settings object and
+  // re-rendering on every settings change ×N cards in the list. The
+  // worst case in the project: any toggle/save in NotificationsSheet
+  // would re-render 100 cards. See audit F2.
+  const userCurrency = useSettingsStore((s) => s.settings.defaultCurrency);
 
   // Convert to user's preferred currency
   const displayAmount = convertCurrency(s.amount, s.currency, userCurrency);
@@ -87,4 +100,4 @@ export function SubscriptionCard({ subscription, onClick }: Props) {
       </div>
     </button>
   );
-}
+});

@@ -61,7 +61,11 @@ export function JoinRoomSheet({ open, onOpenChange, initialCode = "" }: Props) {
   const [loading, setLoading] = useState(false);
   const [touched, setTouched] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
-  const { join } = useRoomStore();
+  // Granular selector — was destructuring the whole roomStore and
+  // re-rendering on every unrelated mutation (mark-paid in a different
+  // room, fetchDetail success, etc.). On low-end Android this caused
+  // visible input lag while typing the invite code. See audit F3.
+  const join = useRoomStore((s) => s.join);
 
   const { t } = useTranslation();
 

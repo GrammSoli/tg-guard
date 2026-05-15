@@ -17,8 +17,11 @@ interface Props {
 export function SharedRooms({ rooms, onViewAll, onOpen, onCreateRoom }: Props) {
   const { t, i18n } = useTranslation();
   const lc = localeFor(i18n.language);
-  const { settings } = useSettingsStore();
-  const userCurrency = settings.defaultCurrency;
+  // Granular selector — was destructuring the whole settings object and
+  // re-rendering the horizontal scroll on every settings change (timezone
+  // sync, locale flip, notification toggle). See audit F1. Now only
+  // re-renders when defaultCurrency itself changes — which is rare.
+  const userCurrency = useSettingsStore((s) => s.settings.defaultCurrency);
   const dragScrollRef = useDragScroll<HTMLDivElement>();
 
   return (
