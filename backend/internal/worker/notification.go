@@ -14,6 +14,7 @@ import (
 
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/notifier"
+	"github.com/subguard/backend/internal/observability"
 	"github.com/subguard/backend/internal/tgutil"
 	"github.com/subguard/backend/internal/workerutil"
 )
@@ -148,6 +149,7 @@ func (w *NotificationWorker) check(ctx context.Context) {
 
 	if err != nil && !errors.Is(err, errBatchCancelled) && !errors.Is(err, context.Canceled) {
 		log.Printf("[notification-worker] batch iteration error: %v", err)
+		observability.CaptureException(err)
 	}
 
 	if seen == 0 {
@@ -170,6 +172,7 @@ func (w *NotificationWorker) check(ctx context.Context) {
 			Update("notified_at", now).Error; err != nil {
 			log.Printf("[notification-worker] bulk notified_at update failed for %d subs: %v",
 				len(sentIDs), err)
+			observability.CaptureException(err)
 		}
 	}
 }
