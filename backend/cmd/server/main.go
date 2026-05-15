@@ -98,7 +98,10 @@ func main() {
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS paywall_enabled BOOLEAN NOT NULL DEFAULT false`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_subs_limit INTEGER NOT NULL DEFAULT 6`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_room_limit INTEGER NOT NULL DEFAULT 1`)
-		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id + paywall columns exist")
+		// Emergency kill-switch columns on app_settings
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN NOT NULL DEFAULT false`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS pause_notifications BOOLEAN NOT NULL DEFAULT false`)
+		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id + paywall + kill-switch columns exist")
 	}
 
 	// Auto-migrate only in test/dev. Production should run a dedicated
@@ -265,7 +268,18 @@ func main() {
 	app.Get("/api/v1/catalog", adminH.ListCatalog)
 
 	// ── Authenticated routes ───────────────────────────
-	auth := app.Group("/api/v1", middleware.AuthMiddleware(cfg.BotToken, db))
+	// MaintenanceGuard is the FIRST middleware in the group — it runs
+	// before AuthMiddleware on purpose. During a maintenance window we
+	// reject as early and cheaply as possible: no initData HMAC
+	// validation, no DB/Redis session work for a request we're going to
+	// 503 anyway. It also means a user with a stale token sees the same
+	// maintenance stub as everyone else, not a misleading "session
+	// expired". The guard skips /admin/ paths so admin endpoints stay
+	// reachable; /health and /webhook live outside this group entirely.
+	auth := app.Group("/api/v1",
+		middleware.MaintenanceGuard(db),
+		middleware.AuthMiddleware(cfg.BotToken, db),
+	)
 
 	// Per-user rate limit on authenticated mutations. The bare limiter
 	// (`max=120/min`) is intentionally generous — the goal is to stop

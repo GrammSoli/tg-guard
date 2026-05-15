@@ -67,6 +67,20 @@ export const useBanStore = create<BanStore>((set) => ({
 /** @deprecated Use useBanStore().banned instead for reactive checks */
 export function isBanned(): boolean { return useBanStore.getState().banned; }
 
+// Global flag set when the server returns 503 maintenance_mode. Defined
+// here (not in a Zustand store file) for the same reason as useBanStore:
+// settingsStore imports this module, so a store file importing back into
+// api.ts would be a circular dependency.
+interface MaintenanceStore {
+  maintenance: boolean;
+  setMaintenance: (v: boolean) => void;
+}
+
+export const useMaintenanceStore = create<MaintenanceStore>((set) => ({
+  maintenance: false,
+  setMaintenance: (v) => set({ maintenance: v }),
+}));
+
 function handleSessionExpired() {
   if (sessionExpiredHandled) return;
   sessionExpiredHandled = true;
@@ -117,6 +131,18 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
       throw new ApiError(403, "account_banned");
     }
     throw new ApiError(403, body || "Forbidden");
+  }
+
+  if (res.status === 503) {
+    // Backend maintenance kill-switch. Flip the global flag so the root
+    // component swaps the whole app for MaintenanceScreen. Other 503s
+    // (proxy/LB hiccups) fall through to the generic !res.ok branch.
+    const body = await res.text().catch(() => "");
+    if (body.includes("maintenance_mode")) {
+      useMaintenanceStore.getState().setMaintenance(true);
+      throw new ApiError(503, "maintenance_mode");
+    }
+    throw new ApiError(503, body || "Service Unavailable");
   }
 
   if (!res.ok) {

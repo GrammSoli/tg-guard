@@ -9,7 +9,8 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { GlobalModals } from "@/components/subguard/GlobalModals";
 import { BannedScreen } from "@/components/subguard/BannedScreen";
-import { useBanStore } from "@/lib/api";
+import { MaintenanceScreen } from "@/components/subguard/MaintenanceScreen";
+import { useBanStore, useMaintenanceStore } from "@/lib/api";
 
 function NotFoundComponent() {
   return (
@@ -79,9 +80,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const banned = useBanStore((s) => s.banned);
+  const maintenance = useMaintenanceStore((s) => s.maintenance);
 
   if (banned) {
     return <BannedScreen />;
+  }
+  // Maintenance gate — any 503 maintenance_mode response from the API
+  // flips this flag (see lib/api.ts). Swaps the whole app for the stub.
+  if (maintenance) {
+    return <MaintenanceScreen />;
   }
 
   return (

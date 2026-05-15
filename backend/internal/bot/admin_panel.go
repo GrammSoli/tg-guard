@@ -222,6 +222,8 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 		ackText = "⏳ Формирую файл..."
 	case "admin_toggle_paywall":
 		ackText = "✅ Статус пейвола изменён!"
+	case "admin_toggle_maintenance", "admin_toggle_notifications":
+		ackText = "✅ Статус изменён!"
 	}
 	b.AnswerCallbackQuery(ctx, &tgbot.AnswerCallbackQueryParams{
 		CallbackQueryID: cb.ID,
@@ -266,6 +268,12 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 
 	case data == "admin_toggle_paywall":
 		p.handlePaywallToggle(ctx, b, chatID, msgID)
+
+	case data == "admin_toggle_maintenance":
+		p.handleSwitchToggle(ctx, b, chatID, msgID, "maintenance")
+
+	case data == "admin_toggle_notifications":
+		p.handleSwitchToggle(ctx, b, chatID, msgID, "notifications")
 
 	case data == "admin_noop":
 		// label-only button, already acked above
@@ -891,12 +899,25 @@ func (p *adminPanel) handleSettingsMenu(ctx context.Context, b *tgbot.Bot, chatI
 	if settings.PaywallEnabled {
 		paywallStatus = "ВКЛЮЧЕН 🟢"
 	}
+	// Emergency switches read inverted: "ON" is the alarm state, so the
+	// red dot marks ON and the green dot marks the healthy OFF state.
+	maintenanceStatus := "ВЫКЛЮЧЕНЫ 🟢"
+	if settings.MaintenanceMode {
+		maintenanceStatus = "ВКЛЮЧЕНЫ 🔴"
+	}
+	notificationsStatus := "ВЫКЛЮЧЕНА 🟢"
+	if settings.PauseNotifications {
+		notificationsStatus = "ВКЛЮЧЕНА 🔴"
+	}
 
 	text := fmt.Sprintf("⚙ *Настройки системы*\n\n"+
 		"💳 Пейвол: *%s*\n"+
 		"📋 Лимит подписок (бесплатно): *%d*\n"+
-		"🏠 Лимит комнат (бесплатно): *%d*",
-		paywallStatus, settings.FreeSubsLimit, settings.FreeRoomLimit)
+		"🏠 Лимит комнат (бесплатно): *%d*\n\n"+
+		"🛠 Техработы: *%s*\n"+
+		"🔕 Пауза уведомлений: *%s*",
+		paywallStatus, settings.FreeSubsLimit, settings.FreeRoomLimit,
+		maintenanceStatus, notificationsStatus)
 
 	kb := models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{
@@ -911,6 +932,8 @@ func (p *adminPanel) handleSettingsMenu(ctx context.Context, b *tgbot.Bot, chatI
 				{Text: fmt.Sprintf("📝 Комнаты: %d", settings.FreeRoomLimit), CallbackData: "admin_noop"},
 				{Text: "➕", CallbackData: "admin_rooms_inc"},
 			},
+			{{Text: "🛠 Переключить Техработы", CallbackData: "admin_toggle_maintenance"}},
+			{{Text: "🔕 Переключить Уведомления", CallbackData: "admin_toggle_notifications"}},
 			{{Text: "🔙 Назад", CallbackData: "admin_back"}},
 		},
 	}
@@ -938,6 +961,37 @@ func (p *adminPanel) handlePaywallToggle(ctx context.Context, b *tgbot.Bot, chat
 	}
 
 	// Re-render the settings menu with updated status
+	p.handleSettingsMenu(ctx, b, chatID, msgID)
+}
+
+// handleSwitchToggle flips one of the emergency kill-switches
+// (maintenance mode / notification pause) and re-renders the settings
+// menu. Same shape as handlePaywallToggle — load, invert, persist,
+// redraw. The callback was already acked with a "Статус изменён!"
+// toast by the router.
+func (p *adminPanel) handleSwitchToggle(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int, which string) {
+	settings, err := p.repo.GetSettings()
+	if err != nil {
+		log.Printf("[admin] %s toggle: load error: %v", which, err)
+		return
+	}
+
+	switch which {
+	case "maintenance":
+		settings.MaintenanceMode = !settings.MaintenanceMode
+		log.Printf("[admin] maintenance_mode -> %v (by tg=%d)", settings.MaintenanceMode, chatID)
+	case "notifications":
+		settings.PauseNotifications = !settings.PauseNotifications
+		log.Printf("[admin] pause_notifications -> %v (by tg=%d)", settings.PauseNotifications, chatID)
+	default:
+		return
+	}
+
+	if err := p.repo.UpdateSettings(settings); err != nil {
+		log.Printf("[admin] %s toggle: save error: %v", which, err)
+		return
+	}
+
 	p.handleSettingsMenu(ctx, b, chatID, msgID)
 }
 
