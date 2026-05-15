@@ -267,19 +267,19 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	case data == "admin_toggle_paywall":
 		p.handlePaywallToggle(ctx, b, chatID, msgID)
 
-	case data == "admin:noop":
+	case data == "admin_noop":
 		// label-only button, already acked above
 
-	case data == "admin:subs_inc":
+	case data == "admin_subs_inc":
 		p.handleLimitChange(ctx, b, chatID, msgID, "subs", 1)
 
-	case data == "admin:subs_dec":
+	case data == "admin_subs_dec":
 		p.handleLimitChange(ctx, b, chatID, msgID, "subs", -1)
 
-	case data == "admin:rooms_inc":
+	case data == "admin_rooms_inc":
 		p.handleLimitChange(ctx, b, chatID, msgID, "rooms", 1)
 
-	case data == "admin:rooms_dec":
+	case data == "admin_rooms_dec":
 		p.handleLimitChange(ctx, b, chatID, msgID, "rooms", -1)
 
 	case strings.HasPrefix(data, "admin_bc_lang_"):
@@ -902,14 +902,14 @@ func (p *adminPanel) handleSettingsMenu(ctx context.Context, b *tgbot.Bot, chatI
 		InlineKeyboard: [][]models.InlineKeyboardButton{
 			{{Text: "Переключить Пейвол 🔄", CallbackData: "admin_toggle_paywall"}},
 			{
-				{Text: "➖", CallbackData: "admin:subs_dec"},
-				{Text: fmt.Sprintf("📝 Подписки: %d", settings.FreeSubsLimit), CallbackData: "admin:noop"},
-				{Text: "➕", CallbackData: "admin:subs_inc"},
+				{Text: "➖", CallbackData: "admin_subs_dec"},
+				{Text: fmt.Sprintf("📝 Подписки: %d", settings.FreeSubsLimit), CallbackData: "admin_noop"},
+				{Text: "➕", CallbackData: "admin_subs_inc"},
 			},
 			{
-				{Text: "➖", CallbackData: "admin:rooms_dec"},
-				{Text: fmt.Sprintf("📝 Комнаты: %d", settings.FreeRoomLimit), CallbackData: "admin:noop"},
-				{Text: "➕", CallbackData: "admin:rooms_inc"},
+				{Text: "➖", CallbackData: "admin_rooms_dec"},
+				{Text: fmt.Sprintf("📝 Комнаты: %d", settings.FreeRoomLimit), CallbackData: "admin_noop"},
+				{Text: "➕", CallbackData: "admin_rooms_inc"},
 			},
 			{{Text: "🔙 Назад", CallbackData: "admin_back"}},
 		},
