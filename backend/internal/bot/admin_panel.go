@@ -158,6 +158,7 @@ func (p *adminPanel) sendMainMenu(ctx context.Context, b *tgbot.Bot, chatID int6
 			},
 			{
 				{Text: "📢 Рассылка", CallbackData: "admin_broadcast"},
+				{Text: "⚙ Настройки", CallbackData: "admin_settings"},
 			},
 		},
 	}
@@ -216,8 +217,11 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	// e.g. "⏳ Формирую файл..." so the admin sees feedback while the
 	// CSV is generated. Add new entries here when needed.
 	ackText := ""
-	if cb.Data == "admin_export_csv" {
+	switch cb.Data {
+	case "admin_export_csv":
 		ackText = "⏳ Формирую файл..."
+	case "admin_toggle_paywall":
+		ackText = "✅ Статус пейвола изменён!"
 	}
 	b.AnswerCallbackQuery(ctx, &tgbot.AnswerCallbackQueryParams{
 		CallbackQueryID: cb.ID,
@@ -256,6 +260,12 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 
 	case data == "admin_broadcast":
 		p.broadcast.handleBroadcastStart(ctx, b, chatID, msgID)
+
+	case data == "admin_settings":
+		p.handleSettingsMenu(ctx, b, chatID, msgID)
+
+	case data == "admin_toggle_paywall":
+		p.handlePaywallToggle(ctx, b, chatID, msgID)
 
 	case strings.HasPrefix(data, "admin_bc_lang_"):
 		p.broadcast.handleBroadcastLang(ctx, b, cb.From.ID, data, chatID, msgID)
@@ -851,6 +861,59 @@ func (p *adminPanel) handleUserDelete(ctx context.Context, b *tgbot.Bot, data st
 		Text:        fmt.Sprintf("🗑 Пользователь #%d удалён.", uid),
 		ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "🔙 Назад", CallbackData: "admin_back"}}}},
 	})
+}
+
+// ── Settings Module ────────────────────────────────────
+
+func (p *adminPanel) handleSettingsMenu(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int) {
+	settings, err := p.repo.GetSettings()
+	if err != nil {
+		log.Printf("[admin] settings load error: %v", err)
+		return
+	}
+
+	paywallStatus := "ВЫКЛЮЧЕН 🔴"
+	if settings.PaywallEnabled {
+		paywallStatus = "ВКЛЮЧЕН 🟢"
+	}
+
+	text := fmt.Sprintf("⚙ *Настройки системы*\n\n"+
+		"💳 Пейвол: *%s*\n"+
+		"📋 Лимит подписок (бесплатно): *%d*\n"+
+		"🏠 Лимит комнат (бесплатно): *%d*",
+		paywallStatus, settings.FreeSubsLimit, settings.FreeRoomLimit)
+
+	kb := models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "Переключить Пейвол 🔄", CallbackData: "admin_toggle_paywall"}},
+			{{Text: "🔙 Назад", CallbackData: "admin_back"}},
+		},
+	}
+
+	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   msgID,
+		Text:        text,
+		ParseMode:   "Markdown",
+		ReplyMarkup: &kb,
+	})
+}
+
+func (p *adminPanel) handlePaywallToggle(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int) {
+	settings, err := p.repo.GetSettings()
+	if err != nil {
+		log.Printf("[admin] paywall toggle: load error: %v", err)
+		return
+	}
+
+	settings.PaywallEnabled = !settings.PaywallEnabled
+	if err := p.repo.UpdateSettings(settings); err != nil {
+		log.Printf("[admin] paywall toggle: save error: %v", err)
+		return
+	}
+
+	// Re-render the settings menu with updated status
+	p.handleSettingsMenu(ctx, b, chatID, msgID)
 }
 
 // ── Sponsors Module ────────────────────────────────────
