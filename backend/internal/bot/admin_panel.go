@@ -290,6 +290,12 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	case data == "admin_rooms_dec":
 		p.handleLimitChange(ctx, b, chatID, msgID, "rooms", -1)
 
+	case data == "admin_prices":
+		p.handlePricesMenu(ctx, b, chatID, msgID)
+
+	case strings.HasPrefix(data, "admin_price_"):
+		p.handlePriceCallback(ctx, b, chatID, msgID, data)
+
 	case strings.HasPrefix(data, "admin_bc_lang_"):
 		p.broadcast.handleBroadcastLang(ctx, b, cb.From.ID, data, chatID, msgID)
 
@@ -932,6 +938,7 @@ func (p *adminPanel) handleSettingsMenu(ctx context.Context, b *tgbot.Bot, chatI
 				{Text: fmt.Sprintf("📝 Комнаты: %d", settings.FreeRoomLimit), CallbackData: "admin_noop"},
 				{Text: "➕", CallbackData: "admin_rooms_inc"},
 			},
+			{{Text: "💰 Настройка цен", CallbackData: "admin_prices"}},
 			{{Text: "🛠 Переключить Техработы", CallbackData: "admin_toggle_maintenance"}},
 			{{Text: "🔕 Переключить Уведомления", CallbackData: "admin_toggle_notifications"}},
 			{{Text: "🔙 Назад", CallbackData: "admin_back"}},
@@ -1023,6 +1030,122 @@ func (p *adminPanel) handleLimitChange(ctx context.Context, b *tgbot.Bot, chatID
 	}
 
 	p.handleSettingsMenu(ctx, b, chatID, msgID)
+}
+
+// ── Premium Pricing Submenu ────────────────────────────
+
+// priceStarsStep / priceCryptoStep are the ± increments for the admin
+// pricing buttons. Stars are cheap units so they move in 50s; crypto is
+// whole USD so it moves in 1s.
+const (
+	priceStarsStep  = 50
+	priceCryptoStep = 1
+	priceFloor      = 1 // no price (Stars or crypto USD) may drop below this
+)
+
+// handlePricesMenu renders the "💰 Настройка цен" submenu — current
+// locale-split Premium prices plus ± buttons for each.
+func (p *adminPanel) handlePricesMenu(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int) {
+	settings, err := p.repo.GetSettings()
+	if err != nil {
+		log.Printf("[admin] prices menu: load error: %v", err)
+		return
+	}
+
+	text := fmt.Sprintf("💰 *Настройка цен*\n\n"+
+		"⭐ Stars (RU): *%d*\n"+
+		"⭐ Stars (EN): *%d*\n"+
+		"💵 Crypto (RU): *$%d*\n"+
+		"💵 Crypto (EN): *$%d*",
+		settings.PriceStarsRU, settings.PriceStarsEN,
+		settings.PriceCryptoUsdRU, settings.PriceCryptoUsdEN)
+
+	kb := models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "➖50", CallbackData: "admin_price_sru_dec"},
+				{Text: fmt.Sprintf("⭐ Stars RU: %d", settings.PriceStarsRU), CallbackData: "admin_noop"},
+				{Text: "➕50", CallbackData: "admin_price_sru_inc"},
+			},
+			{
+				{Text: "➖50", CallbackData: "admin_price_sen_dec"},
+				{Text: fmt.Sprintf("⭐ Stars EN: %d", settings.PriceStarsEN), CallbackData: "admin_noop"},
+				{Text: "➕50", CallbackData: "admin_price_sen_inc"},
+			},
+			{
+				{Text: "➖1$", CallbackData: "admin_price_cru_dec"},
+				{Text: fmt.Sprintf("💵 Crypto RU: $%d", settings.PriceCryptoUsdRU), CallbackData: "admin_noop"},
+				{Text: "➕1$", CallbackData: "admin_price_cru_inc"},
+			},
+			{
+				{Text: "➖1$", CallbackData: "admin_price_cen_dec"},
+				{Text: fmt.Sprintf("💵 Crypto EN: $%d", settings.PriceCryptoUsdEN), CallbackData: "admin_noop"},
+				{Text: "➕1$", CallbackData: "admin_price_cen_inc"},
+			},
+			{{Text: "🔙 Назад", CallbackData: "admin_settings"}},
+		},
+	}
+
+	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   msgID,
+		Text:        text,
+		ParseMode:   "Markdown",
+		ReplyMarkup: &kb,
+	})
+}
+
+// handlePriceCallback parses an "admin_price_<field>_<dir>" callback and
+// applies the change. field ∈ {sru,sen,cru,cen}; dir ∈ {inc,dec}. Stars
+// fields step by priceStarsStep, crypto fields by priceCryptoStep.
+func (p *adminPanel) handlePriceCallback(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int, data string) {
+	parts := strings.Split(strings.TrimPrefix(data, "admin_price_"), "_")
+	if len(parts) != 2 {
+		return
+	}
+	field, dir := parts[0], parts[1]
+
+	step := priceCryptoStep
+	if field == "sru" || field == "sen" {
+		step = priceStarsStep
+	}
+	delta := step
+	if dir == "dec" {
+		delta = -step
+	}
+
+	settings, err := p.repo.GetSettings()
+	if err != nil {
+		log.Printf("[admin] price change: load error: %v", err)
+		return
+	}
+	switch field {
+	case "sru":
+		settings.PriceStarsRU = clampPrice(settings.PriceStarsRU + delta)
+	case "sen":
+		settings.PriceStarsEN = clampPrice(settings.PriceStarsEN + delta)
+	case "cru":
+		settings.PriceCryptoUsdRU = clampPrice(settings.PriceCryptoUsdRU + delta)
+	case "cen":
+		settings.PriceCryptoUsdEN = clampPrice(settings.PriceCryptoUsdEN + delta)
+	default:
+		return
+	}
+
+	if err := p.repo.UpdateSettings(settings); err != nil {
+		log.Printf("[admin] price change: save error: %v", err)
+		return
+	}
+	p.handlePricesMenu(ctx, b, chatID, msgID)
+}
+
+// clampPrice keeps a price at or above priceFloor — a ➖ tap can't drive
+// Stars or crypto USD below 1.
+func clampPrice(v int) int {
+	if v < priceFloor {
+		return priceFloor
+	}
+	return v
 }
 
 // ── Sponsors Module ────────────────────────────────────

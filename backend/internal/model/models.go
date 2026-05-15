@@ -174,6 +174,15 @@ type AppSettings struct {
 	//     fire normally once the switch is flipped back off).
 	MaintenanceMode        bool   `gorm:"default:false;not null" json:"maintenance_mode"`
 	PauseNotifications     bool   `gorm:"default:false;not null" json:"pause_notifications"`
+	// Premium pricing, split by user locale. Stars prices are whole
+	// Telegram Stars; crypto prices are whole USD. The mini-app reads
+	// these from GET /api/v1/config and shows the locale-matched price
+	// in the PremiumSheet; the bot admin panel edits them in ±50 (Stars)
+	// / ±1 (crypto) steps.
+	PriceStarsRU     int `gorm:"default:50;not null" json:"price_stars_ru"`
+	PriceStarsEN     int `gorm:"default:100;not null" json:"price_stars_en"`
+	PriceCryptoUsdRU int `gorm:"default:1;not null" json:"price_crypto_usd_ru"`
+	PriceCryptoUsdEN int `gorm:"default:2;not null" json:"price_crypto_usd_en"`
 }
 
 // Donation logs a successful Telegram Stars payment.

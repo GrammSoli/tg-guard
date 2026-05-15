@@ -212,6 +212,10 @@ func (r *AdminRepo) UpdateSettings(s *model.AppSettings) error {
 			"free_room_limit":         s.FreeRoomLimit,
 			"maintenance_mode":        s.MaintenanceMode,
 			"pause_notifications":     s.PauseNotifications,
+			"price_stars_ru":          s.PriceStarsRU,
+			"price_stars_en":          s.PriceStarsEN,
+			"price_crypto_usd_ru":     s.PriceCryptoUsdRU,
+			"price_crypto_usd_en":     s.PriceCryptoUsdEN,
 		}).Error
 }
 

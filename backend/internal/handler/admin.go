@@ -65,6 +65,12 @@ func (h *AdminHandler) GetPublicConfig(c fiber.Ctx) error {
 		"paywall_enabled": s.PaywallEnabled,
 		"free_subs_limit": s.FreeSubsLimit,
 		"free_room_limit": s.FreeRoomLimit,
+		// Premium pricing, locale-split — the mini-app picks the price
+		// matching its current i18n language for the PremiumSheet.
+		"price_stars_ru":      s.PriceStarsRU,
+		"price_stars_en":      s.PriceStarsEN,
+		"price_crypto_usd_ru": s.PriceCryptoUsdRU,
+		"price_crypto_usd_en": s.PriceCryptoUsdEN,
 	})
 }
 
