@@ -293,6 +293,8 @@
   "premium.unlimitedRoomsHint": "Создавайте неограниченное число комнат для совместных расходов.",
   "premium.upgrade": "Перейти на Premium",
   "premium.later": "Позже",
+  "premium.success_toast": "Premium активирован!",
+  "premium.payment_failed": "Не удалось создать платёж",
   "maintenance.title": "Технические работы",
   "maintenance.subtitle": "Прикручиваем новые фичи, скоро вернёмся ☕️"
 }

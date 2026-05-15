@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Crown, Sparkles, Zap, X } from "lucide-react";
 import {
@@ -8,8 +9,10 @@ import {
   DrawerDescription,
   DrawerFooter,
 } from "@/components/ui/drawer";
-import { hapticImpact } from "@/lib/telegram";
+import { hapticImpact, hapticNotification, openInvoice } from "@/lib/telegram";
 import { usePaywallStore } from "@/stores/paywallStore";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { api } from "@/lib/api";
 
 interface PremiumSheetProps {
   open: boolean;
@@ -18,9 +21,9 @@ interface PremiumSheetProps {
 
 /**
  * Premium upgrade bottom-sheet. Shown when a free-tier user hits a paywall
- * limit (e.g. max subscriptions or max rooms). The "Upgrade" CTA currently
- * shows a coming-soon toast — swap it for real payment once Stars flow is
- * ready.
+ * limit (e.g. max subscriptions or max rooms). The "Upgrade" CTA calls
+ * POST /api/v1/payments/stars to generate a Stars invoice link and opens
+ * it via Telegram.WebApp.openInvoice().
  *
  * Pricing is locale-split and admin-configurable: the prices come from
  * the paywall config (GET /api/v1/config) and the pair shown is picked
@@ -29,6 +32,8 @@ interface PremiumSheetProps {
 export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
   const { t, i18n } = useTranslation();
   const config = usePaywallStore((s) => s.config);
+  const fetchProfile = useSettingsStore((s) => s.fetchProfile);
+  const [loading, setLoading] = useState(false);
 
   // i18n.language is exactly "ru" | "en" (set in lib/i18n.ts); startsWith
   // guards against a regional tag ever slipping in.
@@ -36,13 +41,40 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
   const starsPrice = isRu ? config.price_stars_ru : config.price_stars_en;
   const cryptoPrice = isRu ? config.price_crypto_usd_ru : config.price_crypto_usd_en;
 
-  const handleUpgrade = () => {
+  const handleUpgrade = async () => {
     hapticImpact("medium");
-    // TODO: integrate with Telegram Stars payment
-    import("sonner").then(({ toast }) => {
-      toast.info(t("toast.comingSoon"));
-    });
-    onClose();
+    setLoading(true);
+
+    try {
+      // Step 1: Generate invoice link via backend
+      const { invoice_url } = await api<{ invoice_url: string }>(
+        "/payments/stars",
+        { method: "POST" },
+      );
+
+      // Step 2: Open Telegram's native payment sheet
+      const status = await openInvoice(invoice_url);
+
+      // Step 3: Handle result
+      if (status === "paid") {
+        hapticNotification("success");
+        // Re-fetch profile to pick up is_donator = true. The GET /me
+        // endpoint uses no caching (plain fetch) so this always gets
+        // the fresh DB state.
+        await fetchProfile();
+        const { toast } = await import("sonner");
+        toast.success(t("premium.success_toast"));
+        onClose();
+      }
+      // "cancelled" / "pending" / "failed" — just close the loading state,
+      // the user can retry.
+    } catch (err) {
+      console.error("[PremiumSheet] payment error:", err);
+      const { toast } = await import("sonner");
+      toast.error(t("premium.payment_failed"));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -99,9 +131,12 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
         <DrawerFooter>
           <button
             onClick={handleUpgrade}
-            className="w-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-6 py-3 text-sm font-bold text-black shadow-lg transition-transform active:scale-[0.97]"
+            disabled={loading}
+            className="w-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-6 py-3 text-sm font-bold text-black shadow-lg transition-transform active:scale-[0.97] disabled:opacity-60"
           >
-            {t("premium.upgrade")} · ⭐ {starsPrice}
+            {loading
+              ? (isRu ? "Обработка..." : "Processing...")
+              : `${t("premium.upgrade")} · ⭐ ${starsPrice}`}
           </button>
           <button
             onClick={onClose}
