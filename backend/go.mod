@@ -1,8 +1,9 @@
 module github.com/subguard/backend
 
-go 1.23
+go 1.25.0
 
 require (
+	github.com/getsentry/sentry-go v0.46.2
 	github.com/go-telegram/bot v1.13.2
 	github.com/gofiber/fiber/v3 v3.0.0-beta.4
 	github.com/google/uuid v1.6.0

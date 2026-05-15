@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ import (
 	"github.com/subguard/backend/internal/middleware"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/notifier"
+	"github.com/subguard/backend/internal/observability"
 	"github.com/subguard/backend/internal/seed"
 	"github.com/subguard/backend/internal/worker"
 	"github.com/subguard/backend/internal/workerutil"
@@ -49,6 +51,14 @@ func main() {
 	if isTestMode {
 		log.Println("\u26a0\ufe0f  Running in TEST mode")
 	}
+
+	// \u2500\u2500 Sentry / observability \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+	// No-op when SENTRY_DSN is unset. sentryFlush drains buffered events
+	// on shutdown; deferred first so it runs last. workerutil.PanicHook
+	// routes every recovered worker panic into Sentry as a fatal event.
+	sentryFlush := observability.Init(os.Getenv("APP_VERSION"))
+	defer sentryFlush()
+	workerutil.PanicHook = observability.CapturePanic
 
 	// ── Database ───────────────────────────────────────
 	dbURL := cfg.DatabaseURL
@@ -215,8 +225,19 @@ func main() {
 		ErrorHandler: globalErrorHandler,
 	})
 
-	// Global middleware
-	app.Use(recover.New())
+	// Global middleware. The recover middleware catches panics in any
+	// request handler — including bot callback/command handlers, which
+	// run synchronously inside the /webhook route via bot.ProcessUpdate.
+	// StackTraceHandler routes the panic to Sentry before recover turns
+	// it into a 500.
+	app.Use(recover.New(recover.Config{
+		EnableStackTrace: true,
+		StackTraceHandler: func(c fiber.Ctx, e any) {
+			stack := debug.Stack()
+			log.Printf("[recover] panic on %s %s: %v\n%s", c.Method(), c.Path(), e, stack)
+			observability.CapturePanicWithUser("http:"+c.Path(), sentryUserFromCtx(c), e, stack)
+		},
+	}))
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: corsOrigins(cfg, isTestMode),
@@ -360,7 +381,31 @@ func globalErrorHandler(c fiber.Ctx, err error) error {
 		code = e.Code
 	}
 	log.Printf("[error] %d: %v", code, err)
+	// Only 5xx reaches Sentry — 4xx is client error (bad input, missing
+	// auth) and would just be noise. Panics that recover.New() turned
+	// into a 500 were already reported by its StackTraceHandler, but
+	// re-capturing here is harmless: Sentry dedups by fingerprint.
+	if code >= 500 {
+		observability.CaptureHTTPError(c.Method(), c.Path(), code, sentryUserFromCtx(c), err)
+	}
 	return c.Status(code).JSON(fiber.Map{"error": err.Error()})
+}
+
+// sentryUserFromCtx pulls the authenticated user out of the Fiber
+// request context and adapts it to observability.UserInfo. Returns nil
+// when the request never authenticated (panic before auth middleware,
+// the /webhook route, /health) — the event is still captured, just
+// without user attribution.
+func sentryUserFromCtx(c fiber.Ctx) *observability.UserInfo {
+	u := middleware.UserFromCtx(c)
+	if u == nil {
+		return nil
+	}
+	return &observability.UserInfo{
+		InternalID: u.ID,
+		TelegramID: u.TelegramID,
+		Username:   u.Username,
+	}
 }
 
 // envInt reads an integer env var with a fallback.
