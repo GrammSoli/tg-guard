@@ -14,6 +14,12 @@ type Config struct {
 	AdminTelegramIDs []int64
 	WebhookSecret    string
 	CryptoPayToken   string
+	// CryptoPayAPIURL is the Crypto Pay API base, trailing slash
+	// guaranteed by Load(). Defaults to the TESTNET endpoint so a
+	// deploy that forgets to set it fails safe — no real funds move.
+	// Production MUST set CRYPTO_PAY_API_URL=https://pay.crypt.bot/api/
+	// explicitly (alongside a mainnet CRYPTO_PAY_TOKEN).
+	CryptoPayAPIURL string
 
 	// Database
 	DatabaseURL string
@@ -29,13 +35,14 @@ type Config struct {
 // Load reads configuration from environment variables and validates required fields.
 func Load() (*Config, error) {
 	cfg := &Config{
-		BotToken:      os.Getenv("BOT_TOKEN"),
-		WebhookSecret: os.Getenv("WEBHOOK_SECRET"),
-		CryptoPayToken: os.Getenv("CRYPTO_PAY_TOKEN"),
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		RedisURL:      os.Getenv("REDIS_URL"),
-		APIPort:       os.Getenv("API_PORT"),
-		BaseURL:       os.Getenv("BASE_URL"),
+		BotToken:        os.Getenv("BOT_TOKEN"),
+		WebhookSecret:   os.Getenv("WEBHOOK_SECRET"),
+		CryptoPayToken:  os.Getenv("CRYPTO_PAY_TOKEN"),
+		CryptoPayAPIURL: os.Getenv("CRYPTO_PAY_API_URL"),
+		DatabaseURL:     os.Getenv("DATABASE_URL"),
+		RedisURL:        os.Getenv("REDIS_URL"),
+		APIPort:         os.Getenv("API_PORT"),
+		BaseURL:         os.Getenv("BASE_URL"),
 	}
 
 	if cfg.BotToken == "" {
@@ -52,6 +59,15 @@ func Load() (*Config, error) {
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://app.subguard.click"
+	}
+	// Default to the Crypto Pay TESTNET endpoint. Normalise to a single
+	// trailing slash either way, so callers can blindly append the
+	// method name (cfg.CryptoPayAPIURL + "createInvoice").
+	if cfg.CryptoPayAPIURL == "" {
+		cfg.CryptoPayAPIURL = "https://testnet-pay.crypt.bot/api/"
+	}
+	if !strings.HasSuffix(cfg.CryptoPayAPIURL, "/") {
+		cfg.CryptoPayAPIURL += "/"
 	}
 
 	// Parse comma-separated admin Telegram IDs

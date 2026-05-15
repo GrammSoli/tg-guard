@@ -101,8 +101,10 @@ func (h *PaymentHandler) CreateStarsInvoice(c fiber.Ctx) error {
 }
 
 // ── Crypto Pay (@CryptoBot) ─────────────────────────────────────────
-
-const cryptoPayAPIBase = "https://pay.crypt.bot/api"
+//
+// The API base lives in config (cfg.CryptoPayAPIURL, trailing slash
+// guaranteed) so we can point at the testnet or mainnet endpoint via
+// the CRYPTO_PAY_API_URL env var without a rebuild.
 
 type createInvoiceRequest struct {
 	CurrencyType   string `json:"currency_type"`
@@ -172,7 +174,7 @@ func (h *PaymentHandler) CreateCryptoInvoice(c fiber.Ctx) error {
 
 	bodyBytes, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(c.Context(), http.MethodPost,
-		cryptoPayAPIBase+"/createInvoice", bytes.NewReader(bodyBytes))
+		h.cfg.CryptoPayAPIURL+"createInvoice", bytes.NewReader(bodyBytes))
 	if err != nil {
 		log.Printf("[payment.crypto] request build error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "request build failed"})
