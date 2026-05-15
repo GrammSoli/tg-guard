@@ -1,14 +1,17 @@
+import { useTranslation } from "react-i18next";
+
 /**
  * Full-screen overlay shown when the API returns 503 maintenance_mode.
  * Hides the entire app UI while the backend kill-switch is on.
  * Mirrors BannedScreen's structure for visual consistency.
+ *
+ * Copy is localized via react-i18next. i18n initialises from the URL
+ * ?lang= param / Telegram initData (see lib/i18n.ts) — no API call —
+ * so t() resolves correctly even though the request that surfaced this
+ * screen was a 503.
  */
 export function MaintenanceScreen() {
-  // Simple locale detection from Telegram WebApp — the settings store
-  // may not have loaded (its /me call is exactly what got 503'd).
-  const lang =
-    (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.language_code ?? "en";
-  const isRu = lang.startsWith("ru");
+  const { t } = useTranslation();
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-background">
@@ -23,12 +26,10 @@ export function MaintenanceScreen() {
           </span>
         </div>
         <h1 className="text-xl font-bold text-foreground">
-          {isRu ? "Технические работы" : "Under Maintenance"}
+          {t("maintenance.title")}
         </h1>
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          {isRu
-            ? "Прикручиваем новые фичи, скоро вернёмся ☕️"
-            : "Bolting on new features — back in a moment ☕️"}
+          {t("maintenance.subtitle")}
         </p>
       </div>
     </div>

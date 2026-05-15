@@ -292,5 +292,7 @@
   "premium.unlimitedRooms": "Безлимитные комнаты",
   "premium.unlimitedRoomsHint": "Создавайте неограниченное число комнат для совместных расходов.",
   "premium.upgrade": "Перейти на Premium",
-  "premium.later": "Позже"
+  "premium.later": "Позже",
+  "maintenance.title": "Технические работы",
+  "maintenance.subtitle": "Прикручиваем новые фичи, скоро вернёмся ☕️"
 }

@@ -291,5 +291,7 @@
   "premium.unlimitedRooms": "Unlimited Rooms",
   "premium.unlimitedRoomsHint": "Create unlimited shared rooms and split costs freely.",
   "premium.upgrade": "Upgrade Now",
-  "premium.later": "Maybe later"
+  "premium.later": "Maybe later",
+  "maintenance.title": "Maintenance Break",
+  "maintenance.subtitle": "We are adding new features, we'll be right back ☕️"
 }
