@@ -277,7 +277,7 @@ func main() {
 	// expired". The guard skips /admin/ paths so admin endpoints stay
 	// reachable; /health and /webhook live outside this group entirely.
 	auth := app.Group("/api/v1",
-		middleware.MaintenanceGuard(db),
+		middleware.MaintenanceGuard(db, cfg),
 		middleware.AuthMiddleware(cfg.BotToken, db),
 	)
 
