@@ -121,7 +121,20 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
 
   if (!res.ok) {
     const text = await res.text().catch(() => "Unknown error");
-    throw new ApiError(res.status, text);
+    const apiErr = new ApiError(res.status, text);
+    // 5xx = server-side failure the user can't fix and we need to know
+    // about. Ship it to Sentry tagged with the endpoint. 4xx is client
+    // error (validation, etc.) — left out to avoid noise. Sentry is a
+    // no-op when VITE_SENTRY_DSN is unset.
+    if (res.status >= 500) {
+      void import("@sentry/react").then((Sentry) => {
+        Sentry.captureException(apiErr, {
+          tags: { "api.path": path, "api.method": (rest.method as string) ?? "GET" },
+          extra: { status: res.status, body: text.slice(0, 500) },
+        });
+      });
+    }
+    throw apiErr;
   }
 
   // Handle empty responses (204 No Content)
