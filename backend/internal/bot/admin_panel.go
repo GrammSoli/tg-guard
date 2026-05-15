@@ -266,6 +266,9 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 	case data == "admin_settings":
 		p.handleSettingsMenu(ctx, b, chatID, msgID)
 
+	case data == "admin_limits":
+		p.handleLimitsMenu(ctx, b, chatID, msgID)
+
 	case data == "admin_toggle_paywall":
 		p.handlePaywallToggle(ctx, b, chatID, msgID)
 
@@ -916,28 +919,18 @@ func (p *adminPanel) handleSettingsMenu(ctx context.Context, b *tgbot.Bot, chatI
 		notificationsStatus = "ВКЛЮЧЕНА 🔴"
 	}
 
+	// Free-tier limits moved to their own "📊 Настройка лимитов" submenu
+	// to keep this top-level menu short — see handleLimitsMenu.
 	text := fmt.Sprintf("⚙ *Настройки системы*\n\n"+
-		"💳 Пейвол: *%s*\n"+
-		"📋 Лимит подписок (бесплатно): *%d*\n"+
-		"🏠 Лимит комнат (бесплатно): *%d*\n\n"+
+		"💳 Пейвол: *%s*\n\n"+
 		"🛠 Техработы: *%s*\n"+
 		"🔕 Пауза уведомлений: *%s*",
-		paywallStatus, settings.FreeSubsLimit, settings.FreeRoomLimit,
-		maintenanceStatus, notificationsStatus)
+		paywallStatus, maintenanceStatus, notificationsStatus)
 
 	kb := models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{
 			{{Text: "Переключить Пейвол 🔄", CallbackData: "admin_toggle_paywall"}},
-			{
-				{Text: "➖", CallbackData: "admin_subs_dec"},
-				{Text: fmt.Sprintf("📝 Подписки: %d", settings.FreeSubsLimit), CallbackData: "admin_noop"},
-				{Text: "➕", CallbackData: "admin_subs_inc"},
-			},
-			{
-				{Text: "➖", CallbackData: "admin_rooms_dec"},
-				{Text: fmt.Sprintf("📝 Комнаты: %d", settings.FreeRoomLimit), CallbackData: "admin_noop"},
-				{Text: "➕", CallbackData: "admin_rooms_inc"},
-			},
+			{{Text: "📊 Настройка лимитов", CallbackData: "admin_limits"}},
 			{{Text: "💰 Настройка цен", CallbackData: "admin_prices"}},
 			{{Text: "🛠 Переключить Техработы", CallbackData: "admin_toggle_maintenance"}},
 			{{Text: "🔕 Переключить Уведомления", CallbackData: "admin_toggle_notifications"}},
@@ -1002,8 +995,50 @@ func (p *adminPanel) handleSwitchToggle(ctx context.Context, b *tgbot.Bot, chatI
 	p.handleSettingsMenu(ctx, b, chatID, msgID)
 }
 
+// handleLimitsMenu renders the "📊 Настройка лимитов" submenu — the
+// free-tier subscription / room limits with ± buttons. Split out of the
+// main settings menu to keep that top level short.
+func (p *adminPanel) handleLimitsMenu(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int) {
+	settings, err := p.repo.GetSettings()
+	if err != nil {
+		log.Printf("[admin] limits menu: load error: %v", err)
+		return
+	}
+
+	text := fmt.Sprintf("📊 *Настройка лимитов*\n\n"+
+		"Установите ограничения для бесплатных пользователей:\n"+
+		"📋 Подписки: *%d*\n"+
+		"🚪 Комнаты: *%d*",
+		settings.FreeSubsLimit, settings.FreeRoomLimit)
+
+	kb := models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "➖", CallbackData: "admin_subs_dec"},
+				{Text: fmt.Sprintf("📋 Подписки: %d", settings.FreeSubsLimit), CallbackData: "admin_noop"},
+				{Text: "➕", CallbackData: "admin_subs_inc"},
+			},
+			{
+				{Text: "➖", CallbackData: "admin_rooms_dec"},
+				{Text: fmt.Sprintf("🚪 Комнаты: %d", settings.FreeRoomLimit), CallbackData: "admin_noop"},
+				{Text: "➕", CallbackData: "admin_rooms_inc"},
+			},
+			{{Text: "🔙 Назад", CallbackData: "admin_settings"}},
+		},
+	}
+
+	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   msgID,
+		Text:        text,
+		ParseMode:   "Markdown",
+		ReplyMarkup: &kb,
+	})
+}
+
 // handleLimitChange adjusts free_subs_limit or free_room_limit by delta
-// (typically +1 or -1) and re-renders the settings menu.
+// (typically +1 or -1) and re-renders the limits submenu it was invoked
+// from.
 func (p *adminPanel) handleLimitChange(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int, resource string, delta int) {
 	settings, err := p.repo.GetSettings()
 	if err != nil {
@@ -1029,16 +1064,16 @@ func (p *adminPanel) handleLimitChange(ctx context.Context, b *tgbot.Bot, chatID
 		return
 	}
 
-	p.handleSettingsMenu(ctx, b, chatID, msgID)
+	p.handleLimitsMenu(ctx, b, chatID, msgID)
 }
 
 // ── Premium Pricing Submenu ────────────────────────────
 
 // priceStarsStep / priceCryptoStep are the ± increments for the admin
-// pricing buttons. Stars are cheap units so they move in 50s; crypto is
-// whole USD so it moves in 1s.
+// pricing buttons. Stars move in 10s for finer control; crypto is whole
+// USD so it moves in 1s.
 const (
-	priceStarsStep  = 50
+	priceStarsStep  = 10
 	priceCryptoStep = 1
 	priceFloor      = 1 // no price (Stars or crypto USD) may drop below this
 )
@@ -1063,14 +1098,14 @@ func (p *adminPanel) handlePricesMenu(ctx context.Context, b *tgbot.Bot, chatID 
 	kb := models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{
 			{
-				{Text: "➖50", CallbackData: "admin_price_sru_dec"},
+				{Text: "➖10", CallbackData: "admin_price_sru_dec"},
 				{Text: fmt.Sprintf("⭐ Stars RU: %d", settings.PriceStarsRU), CallbackData: "admin_noop"},
-				{Text: "➕50", CallbackData: "admin_price_sru_inc"},
+				{Text: "➕10", CallbackData: "admin_price_sru_inc"},
 			},
 			{
-				{Text: "➖50", CallbackData: "admin_price_sen_dec"},
+				{Text: "➖10", CallbackData: "admin_price_sen_dec"},
 				{Text: fmt.Sprintf("⭐ Stars EN: %d", settings.PriceStarsEN), CallbackData: "admin_noop"},
-				{Text: "➕50", CallbackData: "admin_price_sen_inc"},
+				{Text: "➕10", CallbackData: "admin_price_sen_inc"},
 			},
 			{
 				{Text: "➖1$", CallbackData: "admin_price_cru_dec"},
