@@ -52,6 +52,22 @@ func (h *AdminHandler) AdminOnly(c fiber.Ctx) error {
 	return c.Next()
 }
 
+// GetPublicConfig returns the paywall configuration visible to all
+// authenticated users. The frontend reads this on boot to know whether
+// to enforce soft limits client-side.
+// GET /api/v1/config
+func (h *AdminHandler) GetPublicConfig(c fiber.Ctx) error {
+	s, err := h.repo.GetSettings()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "config failed"})
+	}
+	return c.JSON(fiber.Map{
+		"paywall_enabled": s.PaywallEnabled,
+		"free_subs_limit": s.FreeSubsLimit,
+		"free_room_limit": s.FreeRoomLimit,
+	})
+}
+
 // GetStats returns live KPI metrics.
 func (h *AdminHandler) GetStats(c fiber.Ctx) error {
 	stats, err := h.repo.GetStats()

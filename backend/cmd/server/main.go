@@ -94,7 +94,11 @@ func main() {
 		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT false`)
 		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`)
 		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS traffic_source_id VARCHAR(64) DEFAULT ''`)
-		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id columns exist")
+		// Paywall columns on app_settings
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS paywall_enabled BOOLEAN NOT NULL DEFAULT false`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_subs_limit INTEGER NOT NULL DEFAULT 6`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_room_limit INTEGER NOT NULL DEFAULT 1`)
+		log.Println("ensured deleted_at + is_banned + is_active + traffic_source_id + paywall columns exist")
 	}
 
 	// Auto-migrate only in test/dev. Production should run a dedicated
@@ -286,6 +290,9 @@ func main() {
 	auth.Patch("/me", userH.UpdateMe)
 	auth.Get("/me/export", userH.ExportMe)
 	auth.Delete("/me", userH.DeleteMe)
+
+	// Public config (paywall limits — available to all authenticated users)
+	auth.Get("/config", adminH.GetPublicConfig)
 
 	// Subscriptions
 	subH := handler.NewSubscriptionHandler(db)

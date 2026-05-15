@@ -284,5 +284,13 @@
   "room.customService": "Свой сервис",
   "room.customServiceHint": "Добавить свой платёж или услугу",
   "room.noteRequired": "Заметка обязательна для различения дубликатов",
-  "room.noteRequiredPh": "напр. Для родителей"
+  "room.noteRequiredPh": "напр. Для родителей",
+  "premium.title": "Перейти на Premium",
+  "premium.description": "Разблокируйте все возможности SubGuard — без ограничений по подпискам и комнатам.",
+  "premium.unlimitedSubs": "Безлимитные подписки",
+  "premium.unlimitedSubsHint": "Отслеживайте столько сервисов, сколько нужно.",
+  "premium.unlimitedRooms": "Безлимитные комнаты",
+  "premium.unlimitedRoomsHint": "Создавайте неограниченное число комнат для совместных расходов.",
+  "premium.upgrade": "Перейти на Premium",
+  "premium.later": "Позже"
 }

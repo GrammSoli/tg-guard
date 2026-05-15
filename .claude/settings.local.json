@@ -39,7 +39,14 @@
       "Bash(git cherry-pick *)",
       "Bash(go env *)",
       "Bash(grep -rn \"MaybeInaccessibleMessage\\\\|CallbackQuery struct\" \"$\\(go env GOMODCACHE\\)/github.com/go-telegram/bot@\"*)",
-      "Bash(sed -n '16,25p' /Users/grammsoli/go/pkg/mod/github.com/go-telegram/bot@v1.13.2/models/message.go)"
+      "Bash(sed -n '16,25p' /Users/grammsoli/go/pkg/mod/github.com/go-telegram/bot@v1.13.2/models/message.go)",
+      "Bash(grep -rn \"MyChatMember\\\\|HandlerTypeChatMember\\\\|ChatMember\" /Users/grammsoli/Documents/tg-guard/backend/vendor 2>/dev/null | head -10; grep -rn \"ChatMember\" /Users/grammsoli/go/pkg/mod/github.com/go-telegram/bot*/bot.go 2>/dev/null | head -10)",
+      "Bash(go test *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'PR #51: mergeable={d[\\\\\"mergeable\\\\\"]}, state={d[\\\\\"mergeStateStatus\\\\\"]}'\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('mergeable:', d['mergeable']\\); print\\('state:', d['mergeStateStatus']\\); print\\('checks:', [\\(c.get\\('name',c.get\\('context','?'\\)\\), c.get\\('conclusion','?'\\), c.get\\('state','?'\\)\\) for c in d.get\\('statusCheckRollup',[]\\)]\\)\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'PR #{d[\\\\\"number\\\\\"]}: mergeable={d[\\\\\"mergeable\\\\\"]}, state={d[\\\\\"mergeStateStatus\\\\\"]}'\\)\")",
+      "Bash(git pull *)"
     ]
   }
 }

@@ -161,6 +161,10 @@ type AppSettings struct {
 	RecommendationsEnabled bool   `gorm:"default:true" json:"recommendations_enabled"`
 	ChannelGateEnabled     bool   `gorm:"default:false" json:"channel_gate_enabled"`
 	TargetChannel          string `gorm:"size:64" json:"target_channel"`
+	// Paywall (grandfathering) — soft limits for free-tier users.
+	PaywallEnabled         bool   `gorm:"default:false" json:"paywall_enabled"`
+	FreeSubsLimit          int    `gorm:"default:6" json:"free_subs_limit"`
+	FreeRoomLimit          int    `gorm:"default:1" json:"free_room_limit"`
 }
 
 // Donation logs a successful Telegram Stars payment.

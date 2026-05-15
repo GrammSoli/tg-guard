@@ -18,12 +18,17 @@ import (
 )
 
 type RoomHandler struct {
-	repo     *repository.RoomRepo
-	notifier notifier.Notifier
+	repo      *repository.RoomRepo
+	adminRepo *repository.AdminRepo
+	notifier  notifier.Notifier
 }
 
 func NewRoomHandler(db *gorm.DB, n notifier.Notifier) *RoomHandler {
-	return &RoomHandler{repo: repository.NewRoomRepo(db), notifier: n}
+	return &RoomHandler{
+		repo:      repository.NewRoomRepo(db),
+		adminRepo: repository.NewAdminRepo(db),
+		notifier:  n,
+	}
 }
 
 func (h *RoomHandler) List(c fiber.Ctx) error {
@@ -102,6 +107,22 @@ func (h *RoomHandler) refreshAndReturn(c fiber.Ctx, roomID uuid.UUID, callerID u
 
 func (h *RoomHandler) Create(c fiber.Ctx) error {
 	user := middleware.UserFromCtx(c)
+
+	// ── Paywall enforcement ────────────────────────────
+	if !user.IsDonator {
+		settings, err := h.adminRepo.GetSettings()
+		if err == nil && settings.PaywallEnabled {
+			count, cerr := h.adminRepo.CountUserOwnedRooms(user.ID)
+			if cerr == nil && count >= int64(settings.FreeRoomLimit) {
+				return c.Status(403).JSON(fiber.Map{
+					"error": "paywall_limit",
+					"limit": settings.FreeRoomLimit,
+					"count": count,
+				})
+			}
+		}
+	}
+
 	var body struct {
 		Name     string `json:"name"`
 		Currency string `json:"currency"`

@@ -36,6 +36,8 @@ import { useSubscriptionStore } from "@/stores/subscriptionStore";
 import { useRoomStore } from "@/stores/roomStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModalStore } from "@/stores/modalStore";
+import { usePaywallStore } from "@/stores/paywallStore";
+import { PremiumSheet } from "./PremiumSheet";
 
 interface Props {
   user?: { name: string };
@@ -87,6 +89,7 @@ export function Dashboard({ user }: Props) {
   );
 
   const [loading, setLoading] = useState(true);
+  const [premiumOpen, setPremiumOpen] = useState(false);
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -97,13 +100,15 @@ export function Dashboard({ user }: Props) {
     openRoom(roomId);
   }, [openRoom]));
 
-  // Init Telegram + fetch rooms on mount
+  // Init Telegram + fetch rooms/paywall config on mount
+  const fetchConfig = usePaywallStore((s) => s.fetchConfig);
   useEffect(() => {
     initTelegramApp();
     fetchRooms();
+    fetchConfig();
     const timer = setTimeout(() => setLoading(false), 800);
     return () => clearTimeout(timer);
-  }, [fetchRooms]);
+  }, [fetchRooms, fetchConfig]);
 
   // Room detail fetching is handled by GlobalModals
 
@@ -201,7 +206,22 @@ export function Dashboard({ user }: Props) {
     [items, settings.defaultCurrency],
   );
 
+  // ── Paywall gate ─────────────────────────────────────
+  const paywallConfig = usePaywallStore((s) => s.config);
+
+  const isPaywalled = (resource: "subs" | "rooms"): boolean => {
+    if (!paywallConfig.paywall_enabled) return false;
+    if (settings.isSubscribed) return false; // premium user
+    if (resource === "subs") return items.length >= paywallConfig.free_subs_limit;
+    return rooms.length >= paywallConfig.free_room_limit;
+  };
+
   const openAdd = () => {
+    if (isPaywalled("subs")) {
+      setPremiumOpen(true);
+      hapticNotification("warning");
+      return;
+    }
     openAddSub(null);
     hapticImpact("medium");
   };
@@ -230,9 +250,14 @@ export function Dashboard({ user }: Props) {
     hapticImpact("light");
   }, [openRoom]);
   const handleCreateRoom = useCallback(() => {
-    openCreateRoom();
-    hapticImpact("medium");
-  }, [openCreateRoom]);
+    if (!paywallConfig.paywall_enabled || settings.isSubscribed || rooms.length < paywallConfig.free_room_limit) {
+      openCreateRoom();
+      hapticImpact("medium");
+    } else {
+      setPremiumOpen(true);
+      hapticNotification("warning");
+    }
+  }, [openCreateRoom, paywallConfig, settings.isSubscribed, rooms.length]);
 
   return (
     <>
@@ -326,6 +351,7 @@ export function Dashboard({ user }: Props) {
         />
 
         <OnboardingSheet />
+        <PremiumSheet open={premiumOpen} onClose={() => setPremiumOpen(false)} />
       </div>
     </>
   );
