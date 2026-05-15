@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"encoding/json"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -8,6 +10,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 
+	"github.com/subguard/backend/internal/config"
 	"github.com/subguard/backend/internal/model"
 )
 
@@ -20,9 +23,16 @@ const maintenanceCacheTTL = 15 * time.Second
 // MaintenanceGuard returns middleware that answers 503 for every request
 // while AppSettings.maintenance_mode is true.
 //
-// Admin API routes (path contains "/admin/") are always allowed through
-// so the operator can still reach admin endpoints during a maintenance
-// window — and, more importantly, so a misfire can't lock anyone out.
+// Two exceptions pass through:
+//   - Admin API routes (path contains "/admin/") — always, so a misfire
+//     can't lock the operator out.
+//   - Requests whose initData carries an admin Telegram id — so admins
+//     can keep using the WebApp during a window. Because this guard runs
+//     BEFORE AuthMiddleware, it does a lightweight UNVALIDATED peek at
+//     the id (see peekTelegramID); a forged admin id is harmless — the
+//     request just reaches AuthMiddleware, which rejects it 401 on the
+//     bad HMAC. The guard never grants access, it only declines to 503.
+//
 // The kill-switch itself is flipped from the Telegram bot (the /webhook
 // route, not /api), which this guard never touches.
 //
@@ -31,7 +41,7 @@ const maintenanceCacheTTL = 15 * time.Second
 // cache fails OPEN: any DB error leaves the cached value unchanged (or
 // false on first read), so a database hiccup never accidentally takes
 // the whole API down.
-func MaintenanceGuard(db *gorm.DB) fiber.Handler {
+func MaintenanceGuard(db *gorm.DB, cfg *config.Config) fiber.Handler {
 	var (
 		mu        sync.RWMutex
 		cachedOn  bool
@@ -68,6 +78,11 @@ func MaintenanceGuard(db *gorm.DB) fiber.Handler {
 			return c.Next()
 		}
 		if isOn() {
+			// Admin bypass: peek (unvalidated) at the initData for an
+			// admin Telegram id. Safe — see the func doc above.
+			if tgID, ok := peekTelegramID(c.Get("X-Telegram-Init-Data")); ok && cfg.IsAdmin(tgID) {
+				return c.Next()
+			}
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 				"error":   "maintenance_mode",
 				"message": "Ведутся технические работы",
@@ -75,4 +90,36 @@ func MaintenanceGuard(db *gorm.DB) fiber.Handler {
 		}
 		return c.Next()
 	}
+}
+
+// peekTelegramID does a lightweight, UNVALIDATED extraction of the
+// Telegram user id from a raw initData query string (the value of the
+// X-Telegram-Init-Data header — this project doesn't use the
+// "Authorization: tma …" form). It deliberately does NOT verify the
+// HMAC signature: that's AuthMiddleware's job, and it runs right after
+// this guard.
+//
+// The only caller is MaintenanceGuard's admin bypass. A forged admin id
+// here merely lets the request reach AuthMiddleware, which then rejects
+// it 401 on the invalid signature — so an unsigned peek grants nothing.
+//
+// Returns ok=false on a missing header, malformed query, missing/blank
+// user field, bad JSON, or a zero id.
+func peekTelegramID(initData string) (int64, bool) {
+	if initData == "" {
+		return 0, false
+	}
+	values, err := url.ParseQuery(initData)
+	if err != nil {
+		return 0, false
+	}
+	userJSON := values.Get("user")
+	if userJSON == "" {
+		return 0, false
+	}
+	var tgUser TelegramUser // reuse the struct from auth.go (same package)
+	if err := json.Unmarshal([]byte(userJSON), &tgUser); err != nil || tgUser.ID == 0 {
+		return 0, false
+	}
+	return tgUser.ID, true
 }
