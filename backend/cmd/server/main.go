@@ -111,6 +111,18 @@ func main() {
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_lifetime_usd_ru INTEGER NOT NULL DEFAULT 10`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_month_usd_en INTEGER NOT NULL DEFAULT 2`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_lifetime_usd_en INTEGER NOT NULL DEFAULT 20`)
+		// Backfill the crypto RU/EN price columns on the existing
+		// singleton AppSettings row. ADD COLUMN ... DEFAULT only
+		// backfills rows present at ALTER time on some setups; if the
+		// row was created/migrated by a path that left them at 0, this
+		// repairs it. Idempotent — the WHERE guard makes it a no-op once
+		// the row holds real values.
+		_, _ = sqlDB.Exec(`UPDATE app_settings SET
+			price_crypto_month_usd_ru = 1,
+			price_crypto_lifetime_usd_ru = 10,
+			price_crypto_month_usd_en = 2,
+			price_crypto_lifetime_usd_en = 20
+			WHERE id = 1 AND price_crypto_month_usd_ru = 0`)
 		// Idempotent charge-ID column on donations (Stars webhook dedup)
 		_, _ = sqlDB.Exec(`ALTER TABLE donations ADD COLUMN IF NOT EXISTS telegram_payment_charge_id VARCHAR(512) NOT NULL DEFAULT ''`)
 		_, _ = sqlDB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_donations_charge_id ON donations (telegram_payment_charge_id) WHERE telegram_payment_charge_id != ''`)
