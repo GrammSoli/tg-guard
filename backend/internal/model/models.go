@@ -19,6 +19,10 @@ type User struct {
 	Timezone        string    `gorm:"default:UTC;size:64" json:"timezone"`
 	BaseCurrency    string    `gorm:"default:USD;size:3" json:"base_currency"`
 	IsDonator       bool      `gorm:"default:false" json:"is_donator"`
+	// PremiumExpiresAt is when a time-limited Premium grant lapses. NULL
+	// means lifetime (or no Premium at all — disambiguate via IsDonator).
+	// The premium-expiration worker clears IsDonator once now() passes it.
+	PremiumExpiresAt *time.Time `json:"premium_expires_at"`
 	// NotificationsEnabled controls whether the notification worker sends
 	// payment-reminder DMs to this user. Default true to preserve the
 	// pre-existing behaviour for users who registered before this field.
@@ -183,6 +187,15 @@ type AppSettings struct {
 	PriceStarsEN     int `gorm:"default:100;not null" json:"price_stars_en"`
 	PriceCryptoUsdRU int `gorm:"default:1;not null" json:"price_crypto_usd_ru"`
 	PriceCryptoUsdEN int `gorm:"default:2;not null" json:"price_crypto_usd_en"`
+	// Plan-split Premium pricing — Month vs Lifetime. Supersedes the
+	// flat Price* fields above for the two-tier paywall. Stars stay
+	// locale-split (RU/EN); crypto is a single USD amount per plan.
+	PriceStarsMonthRU      int `gorm:"default:75;not null" json:"price_stars_month_ru"`
+	PriceStarsLifetimeRU   int `gorm:"default:500;not null" json:"price_stars_lifetime_ru"`
+	PriceStarsMonthEN      int `gorm:"default:150;not null" json:"price_stars_month_en"`
+	PriceStarsLifetimeEN   int `gorm:"default:1000;not null" json:"price_stars_lifetime_en"`
+	PriceCryptoMonthUSD    int `gorm:"default:2;not null" json:"price_crypto_month_usd"`
+	PriceCryptoLifetimeUSD int `gorm:"default:20;not null" json:"price_crypto_lifetime_usd"`
 }
 
 // Donation logs a successful Telegram Stars payment.

@@ -303,6 +303,11 @@
   "premium.payStars": "Оплатить ⭐️ {{price}}",
   "premium.payCrypto": "Оплатить криптой • ${{price}}",
   "premium.processing": "Обработка...",
+  "premium.planMonth": "1 месяц",
+  "premium.planLifetime": "Навсегда",
+  "premium.bestValue": "Выгодно",
+  "premium.activeUntil": "Активен до {{date}}",
+  "premium.lifetimeAccess": "Доступ навсегда",
   "maintenance.title": "Технические работы",
   "maintenance.subtitle": "Прикручиваем новые фичи, скоро вернёмся ☕️"
 }

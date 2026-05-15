@@ -106,6 +106,14 @@ func main() {
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_en INTEGER NOT NULL DEFAULT 100`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_usd_ru INTEGER NOT NULL DEFAULT 1`)
 		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_usd_en INTEGER NOT NULL DEFAULT 2`)
+		// Plan-split (Month / Lifetime) pricing + premium expiry
+		_, _ = sqlDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_expires_at TIMESTAMPTZ`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_month_ru INTEGER NOT NULL DEFAULT 75`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_lifetime_ru INTEGER NOT NULL DEFAULT 500`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_month_en INTEGER NOT NULL DEFAULT 150`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_stars_lifetime_en INTEGER NOT NULL DEFAULT 1000`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_month_usd INTEGER NOT NULL DEFAULT 2`)
+		_, _ = sqlDB.Exec(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS price_crypto_lifetime_usd INTEGER NOT NULL DEFAULT 20`)
 		// Idempotent charge-ID column on donations (Stars webhook dedup)
 		_, _ = sqlDB.Exec(`ALTER TABLE donations ADD COLUMN IF NOT EXISTS telegram_payment_charge_id VARCHAR(512) NOT NULL DEFAULT ''`)
 		_, _ = sqlDB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_donations_charge_id ON donations (telegram_payment_charge_id) WHERE telegram_payment_charge_id != ''`)
@@ -232,6 +240,16 @@ func main() {
 	go func() {
 		defer workerWG.Done()
 		workerutil.Supervise("billing-reset", func() { billingWorker.Start(ctx) })
+	}()
+
+	// Premium-expiration worker — downgrades users whose month-plan
+	// Premium has lapsed. tgBot is nil in test mode; the worker skips
+	// the expiry DM in that case.
+	premiumWorker := worker.NewPremiumWorker(db, tgBot)
+	workerWG.Add(1)
+	go func() {
+		defer workerWG.Done()
+		workerutil.Supervise("premium-expiration", func() { premiumWorker.Start(ctx) })
 	}()
 
 	// ── Fiber app ──────────────────────────────────────

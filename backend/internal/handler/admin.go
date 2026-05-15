@@ -65,12 +65,20 @@ func (h *AdminHandler) GetPublicConfig(c fiber.Ctx) error {
 		"paywall_enabled": s.PaywallEnabled,
 		"free_subs_limit": s.FreeSubsLimit,
 		"free_room_limit": s.FreeRoomLimit,
-		// Premium pricing, locale-split — the mini-app picks the price
-		// matching its current i18n language for the PremiumSheet.
+		// Legacy flat pricing — kept for back-compat with older clients.
 		"price_stars_ru":      s.PriceStarsRU,
 		"price_stars_en":      s.PriceStarsEN,
 		"price_crypto_usd_ru": s.PriceCryptoUsdRU,
 		"price_crypto_usd_en": s.PriceCryptoUsdEN,
+		// Plan-split pricing (Month / Lifetime). Stars locale-split;
+		// crypto a single USD amount per plan. The PremiumSheet picks
+		// the Stars pair by i18n language and shows both plans.
+		"price_stars_month_ru":      s.PriceStarsMonthRU,
+		"price_stars_lifetime_ru":   s.PriceStarsLifetimeRU,
+		"price_stars_month_en":      s.PriceStarsMonthEN,
+		"price_stars_lifetime_en":   s.PriceStarsLifetimeEN,
+		"price_crypto_month_usd":    s.PriceCryptoMonthUSD,
+		"price_crypto_lifetime_usd": s.PriceCryptoLifetimeUSD,
 	})
 }
 

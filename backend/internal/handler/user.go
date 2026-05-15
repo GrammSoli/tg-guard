@@ -99,6 +99,7 @@ func (h *UserHandler) GetMe(c fiber.Ctx) error {
 		"timezone":              user.Timezone,
 		"base_currency":         user.BaseCurrency,
 		"is_donator":            user.IsDonator,
+		"premium_expires_at":    user.PremiumExpiresAt,
 		"is_admin":              h.cfg.IsAdmin(user.TelegramID),
 		"notifications_enabled": user.NotificationsEnabled,
 		"notification_time":     user.NotificationTime,
