@@ -9,6 +9,7 @@ import {
   DrawerFooter,
 } from "@/components/ui/drawer";
 import { hapticImpact } from "@/lib/telegram";
+import { usePaywallStore } from "@/stores/paywallStore";
 
 interface PremiumSheetProps {
   open: boolean;
@@ -20,9 +21,20 @@ interface PremiumSheetProps {
  * limit (e.g. max subscriptions or max rooms). The "Upgrade" CTA currently
  * shows a coming-soon toast — swap it for real payment once Stars flow is
  * ready.
+ *
+ * Pricing is locale-split and admin-configurable: the prices come from
+ * the paywall config (GET /api/v1/config) and the pair shown is picked
+ * by the app's current i18n language, never hardcoded.
  */
 export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const config = usePaywallStore((s) => s.config);
+
+  // i18n.language is exactly "ru" | "en" (set in lib/i18n.ts); startsWith
+  // guards against a regional tag ever slipping in.
+  const isRu = i18n.language.startsWith("ru");
+  const starsPrice = isRu ? config.price_stars_ru : config.price_stars_en;
+  const cryptoPrice = isRu ? config.price_crypto_usd_ru : config.price_crypto_usd_en;
 
   const handleUpgrade = () => {
     hapticImpact("medium");
@@ -74,12 +86,22 @@ export function PremiumSheet({ open, onClose }: PremiumSheetProps) {
           </div>
         </div>
 
+        {/* Locale-split Premium price, sourced from /config — never
+            hardcoded. Shows both payment options the bot supports. */}
+        <div className="px-6 pt-4">
+          <div className="flex items-center justify-center gap-3 rounded-xl bg-surface p-3 text-sm font-semibold">
+            <span>⭐ {starsPrice} Stars</span>
+            <span className="text-muted-foreground">·</span>
+            <span>💵 ${cryptoPrice}</span>
+          </div>
+        </div>
+
         <DrawerFooter>
           <button
             onClick={handleUpgrade}
             className="w-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-6 py-3 text-sm font-bold text-black shadow-lg transition-transform active:scale-[0.97]"
           >
-            {t("premium.upgrade")}
+            {t("premium.upgrade")} · ⭐ {starsPrice}
           </button>
           <button
             onClick={onClose}
