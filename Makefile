@@ -88,3 +88,17 @@ migrate-create:
 # WITHOUT running 000001 (the schema is already there). See docs/MIGRATIONS.md.
 migrate-baseline:
 	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" force 1
+
+# Generate 000001_baseline.up.sql + .down.sql from the production schema.
+# This is step 1 of the PR-2 cutover documented in docs/MIGRATIONS.md.
+# Runs sanity checks against the dump and refuses to write the down
+# migration if the dump is missing expected columns or indexes.
+migrate-generate-baseline:
+	./scripts/generate-baseline.sh
+
+# Show the current migration version + whether the database is "dirty"
+# (a previous up/down failed partway and needs operator intervention).
+# Use as a smoke check before any deploy that includes migrations.
+migrate-status:
+	@migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" version 2>&1 \
+		| awk '{ print "version:", $$0 }'
