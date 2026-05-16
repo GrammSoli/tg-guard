@@ -9,6 +9,7 @@ import (
 
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/observability"
+	"github.com/subguard/backend/internal/timezone"
 )
 
 // BillingResetWorker resets payment statuses on the billing day for each room.
@@ -20,8 +21,9 @@ func NewBillingResetWorker(db *gorm.DB) *BillingResetWorker {
 	return &BillingResetWorker{db: db}
 }
 
-// Start launches the billing reset check loop. Runs once per hour,
-// but only acts on rooms whose billing_day matches the current day.
+// Start launches the billing reset check loop. Ticks every hour because the
+// "is local midnight" check is now per-room: a tick at any UTC hour can be
+// the right moment for some room somewhere on Earth.
 func (w *BillingResetWorker) Start(ctx context.Context) {
 	log.Println("[billing-reset] starting")
 
@@ -45,59 +47,29 @@ func (w *BillingResetWorker) Start(ctx context.Context) {
 // WithContext the queries would continue against a potentially-closing
 // connection pool and raise "database is closed" errors mid-tick.
 //
-// Idempotency: rooms.last_billing_reset_at is the per-room "we already
-// reset today" stamp. The eligibility query filters on it (NULL or
-// strictly older than today's UTC midnight), and each successful reset
-// transactionally writes it. A second tick within the same UTC day —
-// whether from a server restart in the 00:00–01:00 window or from the
-// hour-gate being relaxed in the future — picks up zero rows and is a
-// silent no-op. Replaces the previous "emergent" idempotency that relied
-// on the WHERE has_paid=true clause finding nothing on the second pass:
-// that protection broke as soon as any member re-paid between the two
-// ticks.
+// Per-room timezone semantics: a room with Timezone = "Australia/Sydney"
+// and BillingDay = 15 resets when its OWN local clock is at 00:00–01:59
+// on the 15th — not when 15 Sept 00:00 UTC arrives. We pre-filter at
+// the DB layer (rooms not reset in the last ~23h) and then evaluate
+// roomDueForResetNow() per row, because different rooms in different
+// zones can never share a single SQL day-of-month predicate.
 //
-// Timezone semantics (audit Tier-4 #5): billing_day is interpreted in
-// UTC, NOT in the user's stored timezone. Net effect: a room created
-// by a Sydney user (UTC+10/+11) with billing_day=15 resets at
-// 14 Sept 14:00 Sydney time = 15 Sept 00:00 UTC, not 15 Sept Sydney
-// midnight. This is intentional for now — per-room TZ would require
-// a `timezone` column on shared_rooms, a separate reset cursor per
-// timezone slice, and a UI for the owner to pick. For the current
-// audience (primarily RU/EN single-timezone groups), accepting the
-// "all rooms reset at one global moment" model is simpler and the
-// off-by-up-to-12h shift in the owner's local view of "billing day"
-// is small relative to a monthly cycle. Re-evaluate when shared-
-// rooms grows international.
+// Idempotency stays on last_billing_reset_at: a second tick within the
+// same local day picks up zero rows (the 23h-ago window has already
+// moved past the stamp), so a server restart in the 00:00–01:59 window
+// is a no-op instead of double-clobbering payments members made in
+// between.
 func (w *BillingResetWorker) check(ctx context.Context) {
-	now := time.Now().UTC()
-	today := now.Day()
-	daysInMonth := time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	nowUTC := time.Now().UTC()
+	// Anywhere on Earth, the local "today" can only have started within
+	// the last ~23 hours. Anything stamped more recently than that has
+	// already been handled for its current local day.
+	twentyThreeHoursAgo := nowUTC.Add(-23 * time.Hour)
 
-	// Cheap optimisation: only scan in the 00:00–01:00 UTC window. The
-	// column-based guard below is the real safety net; this just spares
-	// the DB a query 22 times a day. If a deploy goes late and the
-	// worker first ticks at 03:00, we'll miss today — accept that as the
-	// existing contract, since loosening it would change reset timing
-	// semantics that downstream UX (calendar view, reminders) depends on.
-	if now.Hour() > 1 {
-		return
-	}
-
-	// Match rooms whose billing_day == today, PLUS rooms whose stored
-	// billing_day is greater than days-in-this-month and today is the last
-	// day. Without that branch, a room with billing_day=31 would silently
-	// skip February (28/29 days), April (30), June (30), September (30),
-	// November (30).
 	var rooms []model.SharedRoom
-	q := w.db.WithContext(ctx).
-		Where("last_billing_reset_at IS NULL OR last_billing_reset_at < ?", todayStart)
-	if today == daysInMonth {
-		q = q.Where("billing_day = ? OR billing_day > ?", today, daysInMonth)
-	} else {
-		q = q.Where("billing_day = ?", today)
-	}
-	err := q.Find(&rooms).Error
+	err := w.db.WithContext(ctx).
+		Where("last_billing_reset_at IS NULL OR last_billing_reset_at < ?", twentyThreeHoursAgo).
+		Find(&rooms).Error
 	if err != nil {
 		log.Printf("[billing-reset] query error: %v", err)
 		observability.CaptureException(err)
@@ -108,15 +80,18 @@ func (w *BillingResetWorker) check(ctx context.Context) {
 		return
 	}
 
-	log.Printf("[billing-reset] found %d rooms eligible for reset on day %d (month length=%d), resetting payment statuses",
-		len(rooms), today, daysInMonth)
-
-	for _, room := range rooms {
+	eligible := 0
+	for i := range rooms {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
+		room := &rooms[i]
+		if !roomDueForResetNow(room, nowUTC) {
+			continue
+		}
+		eligible++
 
 		// Atomic reset + stamp. If either fails the whole pair rolls
 		// back so the room remains "not reset today" for the next tick.
@@ -128,21 +103,47 @@ func (w *BillingResetWorker) check(ctx context.Context) {
 				return result.Error
 			}
 			if result.RowsAffected > 0 {
-				log.Printf("[billing-reset] reset %d members for room %q (ID: %s)",
-					result.RowsAffected, room.Name, room.ID)
+				log.Printf("[billing-reset] reset %d members for room %q (ID: %s, tz: %s)",
+					result.RowsAffected, room.Name, room.ID, room.Timezone)
 			}
 			return tx.Model(&model.SharedRoom{}).
 				Where("id = ?", room.ID).
-				Update("last_billing_reset_at", now).Error
+				Update("last_billing_reset_at", nowUTC).Error
 		})
 		if txErr != nil {
 			log.Printf("[billing-reset] error processing room %s: %v", room.ID, txErr)
-			// Surface to Sentry — silent DB-write failures here mean
-			// members stay reset / unreset incorrectly, which is hard
-			// to spot without log mining (audit observability hook
-			// from PR #86).
 			observability.CaptureException(txErr)
 			continue
 		}
 	}
+
+	if eligible > 0 {
+		log.Printf("[billing-reset] %d rooms eligible this tick (of %d candidates)",
+			eligible, len(rooms))
+	}
+}
+
+// roomDueForResetNow reports whether, in the room's own timezone,
+// localNow is in the 00:00–01:59 window AND today is the room's
+// billing day (with last-day-of-short-month clamping for billing_day
+// values > the current month's length).
+//
+// The 2-hour window is the safety net for a worker that misses one
+// tick (deploy / restart). Idempotency stays on last_billing_reset_at,
+// so a second tick in the same window is filtered out at the DB layer.
+func roomDueForResetNow(room *model.SharedRoom, nowUTC time.Time) bool {
+	loc := timezone.LoadOrUTC(room.Timezone)
+	localNow := nowUTC.In(loc)
+	if localNow.Hour() > 1 {
+		return false
+	}
+	today := localNow.Day()
+	// daysInMonth needs to be computed in the SAME Location as localNow.
+	// A DST midnight transition can otherwise give an off-by-one month
+	// length.
+	daysInMonth := time.Date(localNow.Year(), localNow.Month()+1, 0, 0, 0, 0, 0, loc).Day()
+	if today == daysInMonth {
+		return room.BillingDay == today || room.BillingDay > daysInMonth
+	}
+	return room.BillingDay == today
 }

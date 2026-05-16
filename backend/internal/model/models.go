@@ -85,6 +85,14 @@ type SharedRoom struct {
 	InviteCode     string     `gorm:"uniqueIndex;size:16" json:"invite_code"`
 	Currency       string     `gorm:"default:USD;size:3" json:"currency"`
 	BillingDay     int        `gorm:"default:1" json:"billing_day"`
+	// Timezone is the IANA name the room's billing calendar is interpreted
+	// in. Snapshotted from the owner's user.timezone at room creation so a
+	// later change in the owner's own zone doesn't retro-shift an
+	// existing room. BillingResetWorker and RoomReminderWorker convert
+	// time.Now() into this zone before comparing the day-of-month with
+	// BillingDay. Default UTC preserves prior global behaviour for any
+	// row that pre-dates the column.
+	Timezone       string     `gorm:"default:UTC;size:64" json:"timezone"`
 	LastRemindedAt *time.Time `json:"last_reminded_at,omitempty"`
 	// LastBillingResetAt is the idempotency guard used by the billing-reset
 	// worker. The worker only resets a room when this is NULL or strictly

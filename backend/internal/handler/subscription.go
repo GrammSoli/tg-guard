@@ -13,6 +13,7 @@ import (
 	"github.com/subguard/backend/internal/middleware"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/repository"
+	"github.com/subguard/backend/internal/timezone"
 )
 
 // errPaywallLimit is the in-tx sentinel for "subscription create denied
@@ -46,10 +47,7 @@ var errPaywallLimit = errors.New("paywall_limit")
 // falls back to UTC so we degrade to today's pre-fix behaviour rather
 // than crashing.
 func parseUserDate(raw, tz string) (time.Time, error) {
-	loc, err := time.LoadLocation(tz)
-	if err != nil || loc == nil {
-		loc = time.UTC
-	}
+	loc := timezone.LoadOrUTC(tz)
 
 	if t, err := time.Parse(time.RFC3339, raw); err == nil {
 		// Legacy-shape detection: exactly UTC-midnight on this calendar

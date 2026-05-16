@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Bell, Clock, Globe } from "lucide-react";
@@ -69,23 +69,15 @@ const TIMEZONE_OPTIONS: { value: string; ru: string; en: string }[] = [
   { value: "Pacific/Auckland", ru: "Окленд (UTC+12/+13)", en: "Auckland (UTC+12/+13)" },
 ];
 
-function detectBrowserTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-}
-
 /**
  * NotificationsSheet — bottom sheet with the per-user notification controls:
  *   - master on/off Switch
  *   - preferred time-of-day Select (visible only when notifications are on)
  *
- * On open the component reconciles the browser's IANA timezone with the
- * server-stored one and silently patches /me if they disagree. The user
- * never sees this — they just notice that reminders land in their local
- * morning, not server-UTC morning.
+ * The browser↔server timezone reconciliation happens up in settingsStore
+ * (fetchProfile syncs the detected IANA name on first load with retry/
+ * backoff), so this sheet only needs to read the stored value and offer
+ * a manual override Select.
  */
 export function NotificationsSheet({ open, onOpenChange }: Props) {
   const { t, i18n } = useTranslation();
@@ -102,27 +94,9 @@ export function NotificationsSheet({ open, onOpenChange }: Props) {
   const [savingTime, setSavingTime] = useState(false);
   const [savingTz, setSavingTz] = useState(false);
 
-  // Effective timezone: use stored value, fallback to browser detection
-  const effectiveTz = storedTimezone && storedTimezone !== "UTC"
-    ? storedTimezone
-    : detectBrowserTimezone();
-
-  // Silent timezone sync. Fires once when the sheet becomes visible: if the
-  // browser's IANA tz differs from what we have on file, push it. No toast,
-  // no UI feedback — this is purely housekeeping. If it fails we just drop
-  // it; the worker falls back to UTC.
-  // updateSettings is a Zustand action — stable ref, omitted from deps
-  // so HMR / strict-mode doesn't trigger a redundant tz round-trip.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!open) return;
-    const browserTz = detectBrowserTimezone();
-    if (browserTz && browserTz !== storedTimezone) {
-      updateSettings({ timezone: browserTz }).catch((err) => {
-        console.warn("[notifications] tz sync failed", err);
-      });
-    }
-  }, [open, storedTimezone]);
+  // Stored TZ is authoritative — the store's fetchProfile already
+  // reconciled it with the browser zone on first load.
+  const effectiveTz = storedTimezone || "UTC";
 
   const reportError = (err: unknown) => {
     const reason = (err as Error)?.message ?? "unknown";

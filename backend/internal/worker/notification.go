@@ -16,6 +16,7 @@ import (
 	"github.com/subguard/backend/internal/notifier"
 	"github.com/subguard/backend/internal/observability"
 	"github.com/subguard/backend/internal/tgutil"
+	"github.com/subguard/backend/internal/timezone"
 	"github.com/subguard/backend/internal/workerutil"
 )
 
@@ -66,18 +67,6 @@ const notificationTickInterval = 30 * time.Minute
 // window has elapsed. 20h chosen so a daily user gets at most one ping
 // per renewal date even if the worker scans every 30 minutes.
 const notificationDedupWindow = 20 * time.Hour
-
-// userTzPref caches the per-user values that shouldSendNow reads on
-// every subscription check — IANA timezone resolution + parsed
-// preferred-time minutes. A single tick can iterate many subscriptions
-// belonging to the same user; without this cache shouldSendNow re-runs
-// time.LoadLocation (zoneinfo file read) and re-parses NotificationTime
-// once per subscription. The cache is created fresh in check() so it
-// can't grow unboundedly across ticks.
-type userTzPref struct {
-	loc     *time.Location
-	prefMin int // minutes from local midnight; never negative once cached
-}
 
 // defaultNotifyMinutes is the fallback "10:00" preference, pre-parsed.
 // Used when a stored NotificationTime fails isValidHHMM (legacy rows /
@@ -149,11 +138,6 @@ func (w *NotificationWorker) check(ctx context.Context) {
 	sentIDs := make([]uuid.UUID, 0, notificationBatchSize)
 	var seen, sentCount int
 
-	// Per-tick cache of (timezone, preferred-time) for each user. Shared
-	// across batches because the same user can have multiple subs that
-	// land in different FindInBatches pages. Cleared when check() returns.
-	tzCache := make(map[uint]userTzPref)
-
 	dest := &[]model.Subscription{}
 	err := w.db.WithContext(ctx).
 		Preload("User", func(db *gorm.DB) *gorm.DB {
@@ -176,7 +160,7 @@ func (w *NotificationWorker) check(ctx context.Context) {
 				default:
 				}
 				sub := &(*batchSubs)[i]
-				if w.tryProcessOne(ctx, sub, now, tzCache) {
+				if w.tryProcessOne(ctx, sub, now) {
 					sentIDs = append(sentIDs, sub.ID)
 					sentCount++
 				}
@@ -244,10 +228,7 @@ func notificationWindow(now time.Time) (start, end time.Time) {
 // tryProcessOne is the per-subscription gate + send loop. Returns true iff
 // the reminder was delivered (so the caller should mark notified_at).
 // All skip reasons are logged inside the helper or shouldSendNow.
-//
-// tzCache is the per-tick cache shared with check() — populated lazily
-// inside shouldSendNow on the first sub belonging to each user.
-func (w *NotificationWorker) tryProcessOne(ctx context.Context, sub *model.Subscription, now time.Time, tzCache map[uint]userTzPref) bool {
+func (w *NotificationWorker) tryProcessOne(ctx context.Context, sub *model.Subscription, now time.Time) bool {
 	userLabel := fmt.Sprintf("user %d (@%s)", sub.User.TelegramID, sub.User.Username)
 
 	if sub.User.TelegramID == 0 {
@@ -262,7 +243,7 @@ func (w *NotificationWorker) tryProcessOne(ctx context.Context, sub *model.Subsc
 		log.Printf("[notification-worker] skip %s sub %q: user is banned", userLabel, sub.Name)
 		return false
 	}
-	if !shouldSendNow(sub, &sub.User, now, tzCache) {
+	if !shouldSendNow(sub, &sub.User, now) {
 		return false // reason already logged inside shouldSendNow
 	}
 
@@ -335,43 +316,35 @@ func (w *NotificationWorker) sendWithRetry(
 // the same row, so a "preferred=23:30 + tick=23:00" sub correctly fires
 // at the 23:30 tick and then gets dedup-blocked by notified_at.
 //
-// tzCache is shared across the whole tick — first call for each user
-// pays the LoadLocation + HH:MM parse cost, the rest of the user's
-// subscriptions reuse the cached pair.
-func shouldSendNow(sub *model.Subscription, u *model.User, now time.Time, tzCache map[uint]userTzPref) bool {
+// LoadLocation hits the package-level sync.Map cache in internal/timezone,
+// so calling this once per subscription is cheap — no per-tick map plumbing
+// required.
+func shouldSendNow(sub *model.Subscription, u *model.User, now time.Time) bool {
 	userLabel := fmt.Sprintf("user %d (@%s)", u.TelegramID, u.Username)
 
-	pref, cached := tzCache[u.ID]
-	if !cached {
-		loc, err := time.LoadLocation(u.Timezone)
-		if err != nil || loc == nil {
-			loc = time.UTC
-		}
-		prefMin := defaultNotifyMinutes
-		if isValidHHMM(u.NotificationTime) {
-			prefMin = parseHHMMToMinutes(u.NotificationTime)
-		}
-		pref = userTzPref{loc: loc, prefMin: prefMin}
-		tzCache[u.ID] = pref
+	loc := timezone.LoadOrUTC(u.Timezone)
+	prefMin := defaultNotifyMinutes
+	if isValidHHMM(u.NotificationTime) {
+		prefMin = parseHHMMToMinutes(u.NotificationTime)
 	}
 
-	localNow := now.In(pref.loc)
+	localNow := now.In(loc)
 	nowMin := localNow.Hour()*60 + localNow.Minute()
 
 	log.Printf("[notification-worker] checking %s sub %q: local_time=%s, preferred_min=%d, next_payment=%s",
 		userLabel, sub.Name,
 		localNow.Format("2006-01-02 15:04"),
-		pref.prefMin,
-		sub.NextPaymentAt.In(pref.loc).Format("2006-01-02 15:04"),
+		prefMin,
+		sub.NextPaymentAt.In(loc).Format("2006-01-02 15:04"),
 	)
 
-	if nowMin < pref.prefMin {
+	if nowMin < prefMin {
 		log.Printf("[notification-worker] skip %s sub %q: too early (now %dm < preferred %dm)",
-			userLabel, sub.Name, nowMin, pref.prefMin)
+			userLabel, sub.Name, nowMin, prefMin)
 		return false
 	}
 
-	next := sub.NextPaymentAt.In(pref.loc)
+	next := sub.NextPaymentAt.In(loc)
 	tomorrow := localNow.AddDate(0, 0, 1)
 	if next.Year() != tomorrow.Year() ||
 		next.Month() != tomorrow.Month() ||
@@ -535,10 +508,7 @@ func (w *NotificationWorker) ForceNotifyUser(ctx context.Context, userID uint) (
 		return 0, 0, fmt.Errorf("user lookup: %w", err)
 	}
 
-	loc, locErr := time.LoadLocation(user.Timezone)
-	if locErr != nil || loc == nil {
-		loc = time.UTC
-	}
+	loc := timezone.LoadOrUTC(user.Timezone)
 
 	// Find ALL subscriptions for this user — no time/dedup filtering.
 	var subs []model.Subscription
