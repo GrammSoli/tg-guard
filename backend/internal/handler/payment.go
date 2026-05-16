@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -395,8 +396,14 @@ func (h *PaymentHandler) HandleCryptoWebhook(c fiber.Ctx) error {
 	log.Printf("👤 [crypto/webhook] Found user: ID=%d, TelegramID=%d, IsDonator=%v",
 		user.ID, user.TelegramID, user.IsDonator)
 
+	// Convert via math.Round to avoid floating-point truncation: a
+	// nominally "0.10" amount comes back from ParseFloat as
+	// 0.099999999… and `int(x*100)` would silently store 9 cents
+	// instead of 10. Crypto Pay USD invoices are always whole-cent
+	// granularity, but guarding against IEEE-754 drift is cheap and
+	// future-proofs us against fractional-fiat currencies. Audit Low.
 	amountFloat, _ := strconv.ParseFloat(invoice.Amount, 64)
-	amountCents := int(amountFloat * 100)
+	amountCents := int(math.Round(amountFloat * 100))
 	expiresAt := premiumExpiryFor(plan)
 
 	var firstTime bool

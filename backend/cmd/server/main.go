@@ -80,8 +80,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("get sql.DB error: %v", err)
 	}
-	sqlDB.SetMaxOpenConns(envInt("DB_MAX_OPEN_CONNS", 25))
-	sqlDB.SetMaxIdleConns(envInt("DB_MAX_IDLE_CONNS", 10))
+	maxOpen := envInt("DB_MAX_OPEN_CONNS", 25)
+	maxIdle := envInt("DB_MAX_IDLE_CONNS", 10)
+	if maxIdle > maxOpen {
+		// database/sql clamps idle to open silently. Warn the operator
+		// so a misconfigured env (e.g. accidentally setting idle larger
+		// than open) doesn't look like "everything's fine, just smaller
+		// idle pool than I asked for." Audit Low.
+		log.Printf("[db] DB_MAX_IDLE_CONNS=%d > DB_MAX_OPEN_CONNS=%d — clamping idle to %d", maxIdle, maxOpen, maxOpen)
+		maxIdle = maxOpen
+	}
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(15 * time.Minute)
 
@@ -148,6 +158,15 @@ func main() {
 		//   full scan is fine at thousands of rows; this index keeps
 		//   the query sub-100ms as the table grows past ~100k subs.
 		runMigration("idx_sub_brand_name", `CREATE INDEX IF NOT EXISTS idx_sub_brand_name ON subscriptions (brand, name)`)
+		//
+		//   idx_users_traffic_source — partial on traffic_source_id WHERE
+		//   non-empty. The admin GetStats today-sources breakdown groups
+		//   by COALESCE(NULLIF(traffic_source_id, ''), 'organic') and
+		//   filters created_at >= today. Without this index the GROUP BY
+		//   degrades to a HashAggregate on a full scan; cheap today
+		//   (most rows are organic = empty), grows linearly with paid
+		//   acquisition. Partial keeps the index small. Audit Low.
+		runMigration("idx_users_traffic_source", `CREATE INDEX IF NOT EXISTS idx_users_traffic_source ON users (traffic_source_id) WHERE traffic_source_id != ''`)
 		// NOTE: a previous destructive UPDATE backfill lived here. It set
 		// `price_crypto_*` to 1/10/2/20 whenever the existing value was 0
 		// — silently overriding a legitimate admin choice of 0 on every

@@ -100,14 +100,23 @@ export function Dashboard({ user }: Props) {
     openRoom(roomId);
   }, [openRoom]));
 
-  // Init Telegram + fetch rooms/paywall config on mount
+  // Init Telegram + fetch rooms/paywall config on mount. Skeleton
+  // hides as soon as BOTH fetches settle — previously a hardcoded
+  // 800ms setTimeout gated the reveal, which (a) made fast networks
+  // wait artificially and (b) on slow networks revealed a not-yet-
+  // populated dashboard. Promise.allSettled tracks both fetches so
+  // the skeleton lifts exactly when there's something real to show.
+  // Audit Low.
   const fetchConfig = usePaywallStore((s) => s.fetchConfig);
   useEffect(() => {
     initTelegramApp();
-    fetchRooms();
-    fetchConfig();
-    const timer = setTimeout(() => setLoading(false), 800);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+    Promise.allSettled([fetchRooms(), fetchConfig()]).then(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [fetchRooms, fetchConfig]);
 
   // Room detail fetching is handled by GlobalModals

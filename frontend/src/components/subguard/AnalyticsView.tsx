@@ -38,7 +38,13 @@ const presets: Preset[] = [
   { key: "30d", labelKey: "analytics.30d", range: () => ({ from: subDays(new Date(), 30), to: new Date() }) },
   { key: "this_month", labelKey: "analytics.thisMonth", range: () => ({ from: startOfMonth(new Date()), to: endOfMonth(new Date()) }) },
   { key: "3m", labelKey: "analytics.3m", range: () => ({ from: subMonths(new Date(), 3), to: new Date() }) },
-  { key: "all", labelKey: "analytics.allTime", range: () => ({ from: new Date(2020, 0, 1), to: new Date(2030, 11, 31) }) },
+  // "all" — open-ended range relative to today rather than a hardcoded
+  // 2020-2030 window. Anchored at year 2000 (predates the project) and
+  // today+5y so a far-future trial_ends_at still falls inside. Audit Low.
+  { key: "all", labelKey: "analytics.allTime", range: () => {
+    const now = new Date();
+    return { from: new Date(2000, 0, 1), to: new Date(now.getFullYear() + 5, 11, 31) };
+  } },
 ];
 
 const toBase = (s: Subscription, baseCurrency: string) =>

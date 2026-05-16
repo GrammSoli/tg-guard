@@ -27,7 +27,12 @@ type Status =
   | { type: "used"; message: string }
   | { type: "loading" };
 
-function deriveStatus(code: string, touched: boolean, t: any): Status {
+// `t` is the react-i18next translation function. Typed as a minimal
+// callable signature rather than `any` so we keep usefulness of the
+// type system at the call sites (TS catches a typo'd t() arity here)
+// without pulling react-i18next's full generic-heavy TFunction shape
+// — which is overkill for this 5-string usage. Audit Low.
+function deriveStatus(code: string, touched: boolean, t: (key: string) => string): Status {
   const trimmed = code.trim();
   if (!trimmed) return touched ? { type: "empty" } : { type: "empty" };
   if (trimmed.length < 4) return { type: "typing" };

@@ -409,7 +409,14 @@ func (h *RoomHandler) RemoveMember(c fiber.Ctx) error {
 
 func (h *RoomHandler) AddService(c fiber.Ctx) error {
 	user := middleware.UserFromCtx(c)
-	roomID, _ := uuid.Parse(c.Params("id"))
+	// 400 on bad UUID — used to fall through to GetByID with the zero
+	// UUID, which then 404'd indistinguishably from "real room not
+	// found." Tightening the parse path makes the API contract
+	// explicit. Audit Low.
+	roomID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "bad room id"})
+	}
 	room, err := h.repo.GetByID(roomID)
 	if err != nil || room.OwnerID != user.ID {
 		return c.Status(403).JSON(fiber.Map{"error": "forbidden"})
@@ -423,18 +430,26 @@ func (h *RoomHandler) AddService(c fiber.Ctx) error {
 		IconName  string  `json:"icon_name"`
 		IconColor string  `json:"icon_color"`
 	}
-	c.Bind().JSON(&body)
-	h.repo.AddService(&model.RoomService{
+	if err := c.Bind().JSON(&body); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "bad body"})
+	}
+	if err := h.repo.AddService(&model.RoomService{
 		RoomID: roomID, Brand: body.Brand, Name: body.Name,
 		Amount: body.Amount, Currency: body.Currency,
 		Note: body.Note, IconName: body.IconName, IconColor: body.IconColor,
-	})
+	}); err != nil {
+		log.Printf("[room.AddService] room=%s: %v", roomID, err)
+		return c.Status(500).JSON(fiber.Map{"error": "add service failed"})
+	}
 	return c.Status(201).JSON(fiber.Map{"ok": true})
 }
 
 func (h *RoomHandler) RemoveService(c fiber.Ctx) error {
 	user := middleware.UserFromCtx(c)
-	roomID, _ := uuid.Parse(c.Params("id"))
+	roomID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "bad room id"})
+	}
 	room, err := h.repo.GetByID(roomID)
 	if err != nil || room.OwnerID != user.ID {
 		return c.Status(403).JSON(fiber.Map{"error": "forbidden"})

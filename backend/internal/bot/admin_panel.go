@@ -1568,7 +1568,13 @@ func (p *adminPanel) handleTrafficDelete(ctx context.Context, b *tgbot.Bot, data
 		return
 	}
 	id, _ := strconv.ParseUint(parts[1], 10, 64)
-	p.db.Delete(&model.TrafficCampaign{}, id)
+	// Surface DB failures — the previous `p.db.Delete(...)` discarded
+	// the result silently, so a permission denial or constraint
+	// violation showed up as "nothing happened" in the admin UI with
+	// no log trail. Audit Low.
+	if err := p.db.Delete(&model.TrafficCampaign{}, id).Error; err != nil {
+		log.Printf("[admin.handleTrafficDelete] id=%d: %v", id, err)
+	}
 	// Return to campaign list
 	p.handleTrafficMenu(ctx, b, chatID, msgID)
 }

@@ -12,6 +12,8 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -56,7 +58,13 @@ const flushTimeout = 2 * time.Second
 // Capture* helpers below are still safe to call when it's false (the
 // sentry-go SDK no-ops without a configured client) — the flag just
 // lets us skip the extra work of building scopes.
-var enabled bool
+//
+// atomic.Bool guards against the (extremely narrow) race of a parallel
+// helper reading `enabled` while Init is writing it. In practice Init
+// runs once at startup before any goroutine that calls Enabled() is
+// spawned, but go-race-detector flagged the unsynchronized write/read
+// pair so we switch to atomic. Audit Low.
+var enabled atomic.Bool
 
 // Init configures the global Sentry client. Returns a flush function
 // the caller should defer in main() so buffered events are drained on
@@ -88,10 +96,17 @@ func Init(release string) func() {
 		TracesSampleRate: 0.0,
 		// Drop the noisy expected-error classes before they leave the
 		// process so they don't burn quota or page anyone.
+		//
+		// Substring (not exact) match because most call sites wrap the
+		// raw ctx error with %w — e.g. `fmt.Errorf("rooms query: %w",
+		// ctx.Err())` produces `"rooms query: context canceled"` which
+		// wouldn't equal "context canceled" under the previous exact
+		// switch but is exactly the same operational signal. Audit Low.
 		BeforeSend: func(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 			for _, ex := range event.Exception {
-				switch ex.Value {
-				case "context canceled", "context deadline exceeded":
+				msg := strings.ToLower(ex.Value)
+				if strings.Contains(msg, "context canceled") ||
+					strings.Contains(msg, "context deadline exceeded") {
 					return nil
 				}
 			}
@@ -102,14 +117,14 @@ func Init(release string) func() {
 		return func() {}
 	}
 
-	enabled = true
+	enabled.Store(true)
 	log.Printf("[sentry] initialised (env=%s release=%q)", env, release)
 	return func() { sentry.Flush(flushTimeout) }
 }
 
 // Enabled reports whether Sentry was successfully configured. Handy for
 // callers that want to skip building expensive context when it's off.
-func Enabled() bool { return enabled }
+func Enabled() bool { return enabled.Load() }
 
 // CaptureException ships an error to Sentry. No-op when Sentry is
 // disabled. Safe to call from any goroutine.

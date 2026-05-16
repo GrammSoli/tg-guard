@@ -36,11 +36,25 @@ export function OnboardingSheet() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (!localStorage.getItem(STORAGE_KEY)) setOpen(true);
+    // localStorage throws in private/incognito contexts and on Safari
+    // with intelligent tracking prevention. Without try/catch every
+    // onboarding-affected user in those contexts would see the
+    // walkthrough on EVERY app open. Audit Low.
+    try {
+      if (!localStorage.getItem(STORAGE_KEY)) setOpen(true);
+    } catch {
+      // Storage unavailable — show the onboarding this session only.
+      setOpen(true);
+    }
   }, []);
 
   const finish = () => {
-    localStorage.setItem(STORAGE_KEY, "1");
+    try {
+      localStorage.setItem(STORAGE_KEY, "1");
+    } catch {
+      // QuotaExceeded / private mode — onboarding will re-appear next
+      // session; acceptable degradation, no user-visible error.
+    }
     setOpen(false);
   };
 

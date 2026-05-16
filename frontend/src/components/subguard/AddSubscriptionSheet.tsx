@@ -147,9 +147,16 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
     setStep("form");
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const isCustom = brand === "default";
-    onSave({
+    // onSave is provided by GlobalModals (async — addSubscription /
+    // updateSubscription). The parent already does haptic feedback in
+    // its own try/catch, but it doesn't surface a toast on failure, so
+    // a save that 5xx'd silently closed the sheet leaving the user
+    // thinking the change landed. Await the parent + toast on the
+    // throw the parent now re-throws after audit T2-3. Audit Low.
+    try {
+      await Promise.resolve(onSave({
       id: initial?.id,
       name: name.trim() || t("modal.untitled"),
       brand,
@@ -174,8 +181,13 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       is_trial: isTrial,
       trial_ends_at: isTrial ? nextDate : null,
       is_auto_pay: autoPay,
-    });
-    onOpenChange(false);
+      }));
+      onOpenChange(false);
+    } catch (err) {
+      console.error("[AddSubscriptionSheet] save failed:", err);
+      const { toast } = await import("sonner");
+      toast.error(t("modal.saveFailed", "Couldn't save — please try again."));
+    }
   };
 
   return (

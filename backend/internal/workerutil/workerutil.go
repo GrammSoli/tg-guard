@@ -104,7 +104,14 @@ func Supervise(name string, fn func()) {
 // in 429 error messages. Both the go-telegram client and Telegram itself
 // surface this as plain text inside the error string; we accept a few
 // surrounding forms with a lenient regex.
-var retryAfterPattern = regexp.MustCompile(`retry after (\d+)`)
+//
+// The trailing word-boundary `\b` guards against partial matches inside
+// unit-bearing suffixes — `retry after 1000 ms` would previously parse
+// as 1000 SECONDS (then cap at 300s = 5 minutes) when the caller
+// actually meant 1s. Telegram only sends seconds, but a future
+// upstream error-wrapper that includes a `_ms` could silently inflate
+// the wait. Audit Low.
+var retryAfterPattern = regexp.MustCompile(`retry after (\d+)\b`)
 
 // ParseRetryAfter extracts the "retry after N seconds" hint from a
 // Telegram 429 error. Returns the parsed duration and ok=true on a
