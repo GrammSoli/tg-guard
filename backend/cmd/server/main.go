@@ -461,7 +461,7 @@ func main() {
 	auth.Post("/recommendations/:id/track/click", recsH.TrackClick)
 
 	// Rooms
-	roomH := handler.NewRoomHandler(db, n)
+	roomH := handler.NewRoomHandler(db, cfg, n)
 	auth.Get("/rooms", roomH.List)
 	auth.Post("/rooms", roomH.Create)
 	auth.Get("/rooms/:id", roomH.GetDetail)

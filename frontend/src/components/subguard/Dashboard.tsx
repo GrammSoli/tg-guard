@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useDeepLinkHandler } from "@/hooks/use-deep-link";
+import { useRoomLinkHandler } from "@/hooks/use-room-link";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -107,6 +108,11 @@ export function Dashboard({ user }: Props) {
 
   // Handle Telegram deep link — auto-open room after join
   useDeepLinkHandler(useCallback((roomId: string) => {
+    openRoom(roomId);
+  }, [openRoom]));
+
+  // Handle the "open room" button from bot payment-reminder messages.
+  useRoomLinkHandler(useCallback((roomId: string) => {
     openRoom(roomId);
   }, [openRoom]));
 

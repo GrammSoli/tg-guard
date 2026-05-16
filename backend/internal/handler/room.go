@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/go-telegram/bot/models"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/subguard/backend/internal/config"
 	"github.com/subguard/backend/internal/middleware"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/notifier"
@@ -24,14 +27,22 @@ type RoomHandler struct {
 	repo      *repository.RoomRepo
 	adminRepo *repository.AdminRepo
 	notifier  notifier.Notifier
+	cfg       *config.Config
 }
 
-func NewRoomHandler(db *gorm.DB, n notifier.Notifier) *RoomHandler {
+func NewRoomHandler(db *gorm.DB, cfg *config.Config, n notifier.Notifier) *RoomHandler {
 	return &RoomHandler{
 		repo:      repository.NewRoomRepo(db),
 		adminRepo: repository.NewAdminRepo(db),
 		notifier:  n,
+		cfg:       cfg,
 	}
+}
+
+// roomDeepLink builds the Mini App URL that opens directly on a room. The
+// frontend reads the `room` query param on load and opens that room.
+func roomDeepLink(baseURL string, roomID uuid.UUID) string {
+	return fmt.Sprintf("%s/?room=%s", strings.TrimRight(baseURL, "/"), roomID)
 }
 
 func (h *RoomHandler) List(c fiber.Ctx) error {
@@ -272,9 +283,17 @@ func (h *RoomHandler) Remind(c fiber.Ctx) error {
 	// render as a clickable link inside a system-looking notification.
 	// Escape ONCE here, not per-recipient, since the name is the same.
 	escapedName := tgutil.EscapeMarkdown(room.Name)
+	// Inline button that opens the Mini App straight onto this room, so the
+	// reminded member lands on the payment screen in a single tap.
+	openRoomKb := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{{{
+			Text:   "Перейти в комнату",
+			WebApp: &models.WebAppInfo{URL: roomDeepLink(h.cfg.BaseURL, id)},
+		}}},
+	}
 	for _, tgID := range tgIDs {
 		text := fmt.Sprintf("🔔 Напоминание: оплатите вашу долю в комнате «%s».", escapedName)
-		if err := h.notifier.SendMessage(sendCtx, tgID, text); err != nil {
+		if err := h.notifier.SendMessageWithMarkup(sendCtx, tgID, text, openRoomKb); err != nil {
 			log.Printf("[remind] failed to send to %d: %v", tgID, err)
 		}
 	}
