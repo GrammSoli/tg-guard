@@ -65,6 +65,14 @@ func (r *SubscriptionRepo) Update(sub *model.Subscription, clearNotified bool) e
 	return r.db.Model(sub).Select(cols).Updates(sub).Error
 }
 
-func (r *SubscriptionRepo) Delete(id uuid.UUID, userID uint) error {
-	return r.db.Where("id = ? AND user_id = ?", id, userID).Delete(&model.Subscription{}).Error
+// Delete removes the subscription that matches BOTH id AND userID.
+// Returns rowsAffected so the handler can distinguish "deleted" (≥1)
+// from "row didn't exist or wasn't yours" (0) — that boundary becomes
+// the 200 / 404 split at the API. Without it, the API used to confirm
+// "deleted":true for any UUID the client sent (including UUIDs of
+// other users' rows that the WHERE clause silently filtered out),
+// which masked IDOR probes as successful operations.
+func (r *SubscriptionRepo) Delete(id uuid.UUID, userID uint) (int64, error) {
+	res := r.db.Where("id = ? AND user_id = ?", id, userID).Delete(&model.Subscription{})
+	return res.RowsAffected, res.Error
 }

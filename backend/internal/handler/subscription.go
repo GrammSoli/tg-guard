@@ -355,8 +355,16 @@ func (h *SubscriptionHandler) Delete(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid subscription id"})
 	}
 
-	if err := h.repo.Delete(id, user.ID); err != nil {
+	affected, err := h.repo.Delete(id, user.ID)
+	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete"})
+	}
+	if affected == 0 {
+		// Row didn't exist, or exists but belongs to a different user.
+		// 404 (not 403) deliberately — the API gives the same answer
+		// for both, so a probing client can't enumerate other users'
+		// subscription IDs via the response code.
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "subscription not found"})
 	}
 
 	return c.JSON(fiber.Map{"deleted": true})

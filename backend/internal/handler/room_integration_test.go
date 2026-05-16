@@ -89,8 +89,10 @@ func TestRoomCreate_CopiesOwnerTimezone(t *testing.T) {
 		"name":     "Family Netflix",
 		"currency": "USD",
 	})
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%v", status, body)
+	// Room.Create returns 201 Created — sub.Create does too; tests pin
+	// the actual handler contract.
+	if status != http.StatusCreated && status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 or 201; body=%v", status, body)
 	}
 
 	var room model.SharedRoom
