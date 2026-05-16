@@ -21,6 +21,7 @@ import (
 	"github.com/subguard/backend/internal/notifier"
 	"github.com/subguard/backend/internal/repository"
 	"github.com/subguard/backend/internal/tgutil"
+	"github.com/subguard/backend/internal/timezone"
 )
 
 type RoomHandler struct {
@@ -102,6 +103,7 @@ func buildRoomDetailResponse(room *model.SharedRoom, callerID uint) fiber.Map {
 	m["members"] = room.Members
 	m["is_owner"] = room.OwnerID == callerID
 	m["billing_day"] = room.BillingDay
+	m["timezone"] = room.Timezone
 	m["created_at"] = room.CreatedAt
 	m["last_reminded_at"] = room.LastRemindedAt
 	return m
@@ -138,11 +140,20 @@ func (h *RoomHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().JSON(&body); err != nil || body.Name == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "name required"})
 	}
-	now := time.Now()
+	ownerTz := user.Timezone
+	if ownerTz == "" {
+		ownerTz = "UTC"
+	}
+	// BillingDay is the day-of-month in the OWNER'S timezone, not UTC.
+	// A Sydney user creating a room at 09:00 local on the 1st would
+	// otherwise get billing_day=31 (still the 31st in UTC) and find
+	// their reset firing on the wrong day every month.
+	localNow := time.Now().In(timezone.LoadOrUTC(ownerTz))
 	room := model.SharedRoom{
 		Name: body.Name, OwnerID: user.ID,
 		Currency:   defaultStr(body.Currency, "USD"),
-		BillingDay: now.Day(),
+		BillingDay: localNow.Day(),
+		Timezone:   ownerTz,
 		Members:    []model.RoomMember{{UserID: user.ID, Name: user.FirstName, Username: user.Username, Avatar: user.PhotoURL, HasPaid: true}},
 	}
 	for _, s := range body.Services {

@@ -17,6 +17,7 @@ import (
 	"github.com/subguard/backend/internal/middleware"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/notifier"
+	"github.com/subguard/backend/internal/timezone"
 	"github.com/subguard/backend/internal/workerutil"
 )
 
@@ -140,8 +141,9 @@ func (h *UserHandler) UpdateMe(c fiber.Ctx) error {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "timezone too long"})
 		}
 		// Validate the IANA tz name so we never persist garbage that the
-		// worker will silently fall back to UTC on.
-		if _, tzErr := time.LoadLocation(*body.Timezone); tzErr != nil {
+		// worker will silently fall back to UTC on. Side-effect caches the
+		// parsed Location for the next worker tick.
+		if !timezone.Validate(*body.Timezone) {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid timezone"})
 		}
 		updates["timezone"] = *body.Timezone

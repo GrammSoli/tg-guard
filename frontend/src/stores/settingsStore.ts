@@ -3,6 +3,51 @@ import * as Sentry from "@sentry/react";
 import type { UserSettings } from "@/types/subscription";
 import { api, ApiError } from "@/lib/api";
 
+/**
+ * Read the user's IANA timezone from the browser. Returns "UTC" when the
+ * Intl API is missing or throws — keeps callers branch-free.
+ */
+function detectBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+/**
+ * Push the detected browser timezone to the backend with exponential
+ * backoff on transient failures. Stops on a 4xx (the value won't get
+ * any more valid on a retry) and gives up after the third attempt.
+ *
+ * Fire-and-forget by design — `fetchProfile` must not block on this.
+ * Worst case we land back at UTC server-side and the next
+ * NotificationsSheet open surfaces the mismatch.
+ */
+async function syncTimezoneWithBackoff(tz: string): Promise<void> {
+  const delaysMs = [0, 1000, 4000];
+  for (let attempt = 0; attempt < delaysMs.length; attempt++) {
+    if (delaysMs[attempt] > 0) {
+      await new Promise((r) => setTimeout(r, delaysMs[attempt]));
+    }
+    try {
+      await api("/me", { method: "PATCH", body: { timezone: tz } });
+      return;
+    } catch (err) {
+      // 4xx → server actively rejected (invalid IANA name, ban, etc.).
+      // Retrying won't change the verdict.
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+        console.warn("[settings] tz sync rejected by server", err);
+        return;
+      }
+      if (attempt === delaysMs.length - 1) {
+        console.warn("[settings] tz sync gave up after retries", err);
+        Sentry.captureException(err);
+      }
+    }
+  }
+}
+
 interface MeResponse {
   id: number;
   telegram_id: number;
@@ -66,6 +111,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         telegram_id: me.telegram_id,
       });
 
+      const serverTz = me.timezone ?? "UTC";
       set({
         settings: {
           locale,
@@ -75,7 +121,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           premiumExpiresAt: me.premium_expires_at ?? null,
           cpaActive: false,
           notificationsEnabled: me.notifications_enabled ?? true,
-          timezone: me.timezone ?? "UTC",
+          timezone: serverTz,
           notificationTime: me.notification_time ?? "10:00",
         },
         user: {
@@ -85,6 +131,18 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         },
         loading: false,
       });
+
+      // Eager timezone sync: when the server has the bare default ("UTC"
+      // or empty), assume this is the first auth from a fresh browser
+      // and push the detected IANA name up. A user who already picked
+      // a non-UTC zone (e.g. via NotificationsSheet from another device)
+      // is NOT overwritten — we'd otherwise stamp on Asia/Tokyo every
+      // time they open the app from a laptop in London.
+      const browserTz = detectBrowserTimezone();
+      if (browserTz && browserTz !== serverTz && (serverTz === "UTC" || serverTz === "")) {
+        set((s) => ({ settings: { ...s.settings, timezone: browserTz } }));
+        void syncTimezoneWithBackoff(browserTz);
+      }
     } catch {
       set({ loading: false });
     }

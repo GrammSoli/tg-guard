@@ -11,6 +11,12 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	// Embed the IANA tzdata so distroless/scratch containers can resolve
+	// every zone name a user might submit. Without this, the slim image
+	// at runtime falls back to UTC for anything that needs /usr/share/
+	// zoneinfo — the timezone package's silent UTC fallback would mask
+	// the failure and reminders would arrive at the wrong wall-clock time.
+	_ "time/tzdata"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -143,6 +149,26 @@ func main() {
 		// DMs). Existing rooms get NULL and are simply reminded on their
 		// next eligible day — no backfill needed.
 		runMigration("shared_rooms.last_billing_reminder_at", `ALTER TABLE shared_rooms ADD COLUMN IF NOT EXISTS last_billing_reminder_at TIMESTAMPTZ`)
+		// Per-room IANA timezone. Default UTC matches prior worker semantics
+		// (billing_day was interpreted in UTC globally); new rooms get the
+		// owner's TZ snapshot at CreateRoom time.
+		runMigration("shared_rooms.timezone", `ALTER TABLE shared_rooms ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) NOT NULL DEFAULT 'UTC'`)
+		// One-shot backfill: copy each owner's stored TZ into rooms still
+		// sitting on the default UTC. Idempotent — subsequent runs find
+		// nothing to update once every room has a non-default value.
+		// Safe because BillingResetWorker is keyed on last_billing_reset_at
+		// and the shift in reset moment for an existing room is at most
+		// ~12h of local-time drift, which the worker's 2h tolerance window
+		// absorbs on the next eligible day.
+		runMigration("shared_rooms.timezone.backfill", `
+			UPDATE shared_rooms r
+			SET timezone = u.timezone
+			FROM users u
+			WHERE u.id = r.owner_id
+			  AND r.timezone = 'UTC'
+			  AND u.timezone IS NOT NULL
+			  AND u.timezone <> ''
+			  AND u.timezone <> 'UTC'`)
 		// Performance indexes (audit Tier-3 #1, #2):
 		//
 		//   idx_sub_due_unsent — covers the notification worker's hot
@@ -316,7 +342,9 @@ func main() {
 	}()
 
 	// Room-reminder worker — DMs every member the day before their room's
-	// monthly billing_day. Runs once daily at ROOM_REMINDER_HOUR (UTC).
+	// monthly billing_day. The hourly tick fires globally, but each room
+	// only gets a reminder when ITS local clock reads ROOM_REMINDER_HOUR
+	// (room.timezone, not UTC).
 	roomReminderWorker := worker.NewRoomReminderWorker(db, n, cfg.BaseURL, envInt("ROOM_REMINDER_HOUR", 9))
 	workerWG.Add(1)
 	go func() {

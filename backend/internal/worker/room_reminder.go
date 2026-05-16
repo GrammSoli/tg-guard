@@ -14,6 +14,7 @@ import (
 	"github.com/subguard/backend/internal/notifier"
 	"github.com/subguard/backend/internal/observability"
 	"github.com/subguard/backend/internal/tgutil"
+	"github.com/subguard/backend/internal/timezone"
 )
 
 // RoomReminderWorker DMs every member of a shared room the day before its
@@ -21,10 +22,14 @@ import (
 // worker clears the paid flags. It is the automatic counterpart to the
 // owner-initiated manual reminder in handler/room.go.
 type RoomReminderWorker struct {
-	db           *gorm.DB
-	notifier     notifier.Notifier
-	baseURL      string
-	reminderHour int // UTC hour at which the once-daily reminder pass runs
+	db       *gorm.DB
+	notifier notifier.Notifier
+	baseURL  string
+	// reminderHour is the LOCAL hour-of-day (in each room's own timezone)
+	// at which the once-daily reminder pass fires. The worker still
+	// ticks hourly in UTC, but only acts on rooms whose local clock
+	// currently reads this hour.
+	reminderHour int
 }
 
 func NewRoomReminderWorker(db *gorm.DB, n notifier.Notifier, baseURL string, reminderHour int) *RoomReminderWorker {
@@ -52,13 +57,19 @@ func (w *RoomReminderWorker) Start(ctx context.Context) {
 }
 
 // billsTomorrow reports whether a room with the given billing_day has its
-// next monthly charge on the day after `now` (UTC). A billing_day past the
+// next monthly charge on the day after localNow. A billing_day past the
 // end of a short month is clamped to that month's last day, mirroring
 // BillingResetWorker so the reminder and the reset agree on the date.
-func billsTomorrow(billingDay int, now time.Time) bool {
-	tomorrow := now.AddDate(0, 0, 1)
+//
+// localNow must already be expressed in the ROOM's timezone — that's
+// the only way "tomorrow" and "this month's length" land on the
+// calendar boundary the room's members will see on their own clocks.
+func billsTomorrow(billingDay int, localNow time.Time) bool {
+	tomorrow := localNow.AddDate(0, 0, 1)
 	y, m, _ := tomorrow.Date()
-	daysInMonth := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	// daysInMonth in the SAME Location as localNow — a DST midnight
+	// transition can otherwise give an off-by-one month length.
+	daysInMonth := time.Date(y, m+1, 0, 0, 0, 0, 0, tomorrow.Location()).Day()
 	effective := billingDay
 	if effective > daysInMonth {
 		effective = daysInMonth
@@ -67,21 +78,19 @@ func billsTomorrow(billingDay int, now time.Time) bool {
 }
 
 func (w *RoomReminderWorker) check(ctx context.Context) {
-	now := time.Now().UTC()
-	// One pass per day, at the configured hour. Other ticks return early.
-	if now.Hour() != w.reminderHour {
-		return
-	}
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	nowUTC := time.Now().UTC()
+	// Anywhere on Earth, the local reminderHour can only have started
+	// within the last ~23 hours. Anything stamped more recently has
+	// already been reminded for its current local day.
+	twentyThreeHoursAgo := nowUTC.Add(-23 * time.Hour)
 
 	// last_billing_reminder_at is the per-room "already reminded today"
-	// stamp — a second tick within the same hour (e.g. a mid-window
-	// restart) finds nothing and is a silent no-op instead of
-	// double-messaging every member.
+	// stamp — a second tick within the same local day finds the row
+	// filtered out and is a silent no-op instead of double-messaging.
 	var rooms []model.SharedRoom
 	err := w.db.WithContext(ctx).
 		Preload("Members.User").
-		Where("last_billing_reminder_at IS NULL OR last_billing_reminder_at < ?", todayStart).
+		Where("last_billing_reminder_at IS NULL OR last_billing_reminder_at < ?", twentyThreeHoursAgo).
 		Find(&rooms).Error
 	if err != nil {
 		log.Printf("[room-reminder] query error: %v", err)
@@ -96,10 +105,15 @@ func (w *RoomReminderWorker) check(ctx context.Context) {
 		default:
 		}
 		room := &rooms[i]
-		if !billsTomorrow(room.BillingDay, now) {
+		loc := timezone.LoadOrUTC(room.Timezone)
+		localNow := nowUTC.In(loc)
+		if localNow.Hour() != w.reminderHour {
 			continue
 		}
-		w.remindRoom(ctx, room, now)
+		if !billsTomorrow(room.BillingDay, localNow) {
+			continue
+		}
+		w.remindRoom(ctx, room, nowUTC)
 	}
 }
 
