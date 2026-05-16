@@ -78,6 +78,7 @@ func billsTomorrow(billingDay int, localNow time.Time) bool {
 }
 
 func (w *RoomReminderWorker) check(ctx context.Context) {
+	defer observability.TimeWorkerTick("room-reminder")()
 	nowUTC := time.Now().UTC()
 	// Anywhere on Earth, the local reminderHour can only have started
 	// within the last ~23 hours. Anything stamped more recently has

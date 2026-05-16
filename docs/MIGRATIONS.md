@@ -35,38 +35,29 @@ export DATABASE_URL="postgres://subguard:PASS@HOST:5432/subguard?sslmode=disable
 
 ### 1. Generate the baseline from the REAL production schema
 
-The baseline must equal whatever production currently has — **after** the
-current backend (with the `runMigration` block) has booted at least once, so
-every column and partial index exists.
+Run the helper script — it captures the production schema, strips
+migrate's own `schema_migrations` table from the dump, runs sanity
+checks for the audit-era columns/indexes, and writes both
+`000001_baseline.up.sql` and a no-op `.down.sql`:
 
 ```sh
-pg_dump --schema-only --no-owner --no-privileges \
-  -U subguard -d subguard > backend/migrations/000001_baseline.up.sql
+DATABASE_URL='postgres://subguard:PASS@PROD_HOST:5432/subguard?sslmode=disable' \
+  make migrate-generate-baseline
 ```
 
-Verify the dump contains the latest columns before trusting it, e.g.:
+The script aborts if any expected column or index is missing — that's
+the signal that `DATABASE_URL` points at a stale environment (e.g. a
+local container running an old image). Always run against the canonical
+production DB.
 
-```sh
-grep -c price_stars_month_ru backend/migrations/000001_baseline.up.sql   # expect 1
-grep -c last_billing_reset_at backend/migrations/000001_baseline.up.sql  # expect 1
-grep -c idx_sub_due_unsent     backend/migrations/000001_baseline.up.sql # expect 1
-```
+> The script must run **after** the current backend (with the
+> `runMigration` block) has booted at least once against the target
+> DB, so every column and partial index added by the audit pass
+> actually exists.
 
-> A dump taken from a stale environment (e.g. a local container running an old
-> image) will have diverged columns such as `price_stars_ru` instead of
-> `price_stars_month_ru`. Always dump the canonical production DB.
-
-Remove the `schema_migrations` table from the dump if `pg_dump` included it —
-migrate manages that table itself.
-
-The `down` migration is a no-op (rolling the baseline back = restore a snapshot,
-see `docs/BACKUP_VERIFICATION.md`):
-
-```sql
--- 000001_baseline.down.sql
--- Baseline rollback is a snapshot restore, not a migration. Intentionally empty.
-SELECT 1;
-```
+The down migration is intentionally a no-op — rolling the baseline back
+means restoring a snapshot, not running SQL. See `docs/BACKUP.md` for
+the disaster-recovery procedure.
 
 ### 2. Stamp existing databases (prod + staging)
 
@@ -109,4 +100,27 @@ make migrate-create name=add_user_locale   # new 000NNN pair
 # edit the generated .up.sql / .down.sql
 make migrate-up                            # apply
 make migrate-down                          # roll back one step
+make migrate-status                        # current version (pre-deploy smoke)
 ```
+
+## When `migrate-status` reports "dirty"
+
+A previous `migrate up` or `down` died partway through — usually a SQL
+error inside the migration, occasionally a process kill. The DB is in
+an intermediate state and migrate refuses further ops until you
+acknowledge it.
+
+Procedure:
+1. Look at the failed migration (`migrate-status` prints the version).
+2. Reconcile the DB by hand — either finish the migration's intent or
+   roll it back manually with `psql`.
+3. Once the DB matches the version you reconciled to, force-stamp it:
+   ```sh
+   migrate -path backend/migrations -database "$DATABASE_URL" force <N>
+   ```
+4. Re-run `make migrate-status` — should be `version: <N>` with no
+   "dirty" suffix.
+
+If you can't easily reconcile, restore the most recent backup
+(`docs/BACKUP.md`) — it's almost certainly faster than untangling
+partial DDL.

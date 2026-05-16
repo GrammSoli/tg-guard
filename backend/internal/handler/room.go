@@ -140,6 +140,35 @@ func (h *RoomHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().JSON(&body); err != nil || body.Name == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "name required"})
 	}
+	// Mirror SharedRoom/RoomService size caps so oversized inputs reject
+	// at the boundary instead of being silently truncated by Postgres.
+	if err := maxLen(c, "name", body.Name, 50); err != nil {
+		return err
+	}
+	if err := maxLen(c, "currency", body.Currency, 3); err != nil {
+		return err
+	}
+	for i, s := range body.Services {
+		prefix := fmt.Sprintf("services[%d]", i)
+		if err := maxLen(c, prefix+".brand", s.Brand, 32); err != nil {
+			return err
+		}
+		if err := maxLen(c, prefix+".name", s.Name, 100); err != nil {
+			return err
+		}
+		if err := maxLen(c, prefix+".currency", s.Currency, 3); err != nil {
+			return err
+		}
+		if err := maxLen(c, prefix+".note", s.Note, 128); err != nil {
+			return err
+		}
+		if err := maxLen(c, prefix+".icon_name", s.IconName, 32); err != nil {
+			return err
+		}
+		if err := maxLen(c, prefix+".icon_color", s.IconColor, 16); err != nil {
+			return err
+		}
+	}
 	ownerTz := user.Timezone
 	if ownerTz == "" {
 		ownerTz = "UTC"
@@ -462,6 +491,26 @@ func (h *RoomHandler) AddService(c fiber.Ctx) error {
 	}
 	if err := c.Bind().JSON(&body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "bad body"})
+	}
+	// Length caps mirror RoomService gorm:"size:N" tags to prevent
+	// silent VARCHAR truncation at the DB layer.
+	if err := maxLen(c, "brand", body.Brand, 32); err != nil {
+		return err
+	}
+	if err := maxLen(c, "name", body.Name, 100); err != nil {
+		return err
+	}
+	if err := maxLen(c, "currency", body.Currency, 3); err != nil {
+		return err
+	}
+	if err := maxLen(c, "note", body.Note, 128); err != nil {
+		return err
+	}
+	if err := maxLen(c, "icon_name", body.IconName, 32); err != nil {
+		return err
+	}
+	if err := maxLen(c, "icon_color", body.IconColor, 16); err != nil {
+		return err
 	}
 	if err := h.repo.AddService(&model.RoomService{
 		RoomID: roomID, Brand: body.Brand, Name: body.Name,

@@ -21,6 +21,25 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
+  # Integration tests are split out so a Docker-pull hiccup on the
+  # runner doesn't drown the unit-test signal. They spin up Postgres
+  # via testcontainers-go to exercise paths pure unit tests can't fake
+  # (upsert RETURNING semantics, indexes, full schema).
+  backend-integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      # GitHub-hosted ubuntu runners ship Docker pre-installed;
+      # testcontainers discovers it without further setup.
+      - run: go test -tags=integration -timeout=300s ./...
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

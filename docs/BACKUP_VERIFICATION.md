@@ -4,6 +4,14 @@ A snapshot you have never restored is not a backup. Run this once before launch,
 then on a schedule. It doubles as the staging environment for rehearsing the
 migration baseline cutover (`docs/MIGRATIONS.md`).
 
+> **Routine vs. pre-launch.** This file is the pre-launch checklist —
+> done once by a human against a real prod snapshot to prove the
+> backup is restorable end-to-end. For routine operations (schedule,
+> retention, daily checks, the weekly hand-drill), see
+> [`BACKUP.md`](BACKUP.md). For continuous CI validation of the
+> dump/restore *procedure* against this codebase's schema, see the
+> `backup-restore-drill` GitHub workflow.
+
 ## 1. Take a production snapshot
 
 ```sh

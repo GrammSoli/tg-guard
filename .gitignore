@@ -20,6 +20,11 @@ frontend/playwright-report/
 # ── Docker ──
 docker-compose.override.yml
 
+# ── Postgres backups ──
+# The postgres-backup sidecar writes gzipped dumps to ./backups/. They
+# contain real user data and MUST never reach git history.
+backups/
+
 # ── IDE ──
 .idea/
 .vscode/

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -19,6 +20,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/logger"
@@ -58,6 +60,21 @@ func main() {
 		log.Println("\u26a0\ufe0f  Running in TEST mode")
 	}
 
+	// \u2500\u2500 Structured logging \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+	// JSON handler on the default slog logger + the stdlib log package
+	// rewired through it, so every log.Printf in the existing codebase
+	// AND every new slog.Info call emits parseable structured records.
+	// LOG_LEVEL=debug|info|warn|error overrides the default (info).
+	// LOG_FORMAT=text falls back to the human-readable text handler \u2014
+	// useful for `make dev-backend` so the console isn't a wall of JSON.
+	setupSlog()
+
+	// \u2500\u2500 Prometheus metrics \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+	// Registered once on boot; the /metrics route mounts the standard
+	// promhttp handler below. Cheap idempotent \u2014 duplicate Register
+	// calls in tests are no-ops.
+	observability.Register()
+
 	// \u2500\u2500 Sentry / observability \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 	// No-op when SENTRY_DSN is unset. sentryFlush drains buffered events
 	// on shutdown; deferred first so it runs last. workerutil.PanicHook
@@ -86,8 +103,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("get sql.DB error: %v", err)
 	}
-	maxOpen := envInt("DB_MAX_OPEN_CONNS", 25)
-	maxIdle := envInt("DB_MAX_IDLE_CONNS", 10)
+	// Defaults sized for the 1k–10k user soft-launch range. 50 open / 20
+	// idle leaves headroom for 6 background workers + the HTTP pool to
+	// burst together on a single backend instance, against the standard
+	// PG max_connections=100 baseline. Env vars override for either
+	// direction (small VPS or larger managed Postgres).
+	maxOpen := envInt("DB_MAX_OPEN_CONNS", 50)
+	maxIdle := envInt("DB_MAX_IDLE_CONNS", 20)
 	if maxIdle > maxOpen {
 		// database/sql clamps idle to open silently. Warn the operator
 		// so a misconfigured env (e.g. accidentally setting idle larger
@@ -100,6 +122,14 @@ func main() {
 	sqlDB.SetMaxIdleConns(maxIdle)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(15 * time.Minute)
+
+	// DB pool gauges fed via a 15s background poll of sql.DBStats —
+	// cheap (in-memory) and updates the Prometheus DBPoolStats gauges
+	// so alerting can fire on "in_use approaching max_open" before the
+	// pool starts queueing requests.
+	dbStatsStop := make(chan struct{})
+	observability.StartDBPoolWatcher(dbStatsStop, sqlDB, 15*time.Second)
+	defer close(dbStatsStop)
 
 	// Always ensure recently-added columns exist. Safe to run repeatedly
 	// thanks to IF NOT EXISTS. Required because RUN_MIGRATIONS is off in
@@ -207,6 +237,46 @@ func main() {
 		// already backfills existing rows on PG 11+, and from this
 		// deploy onwards the admin UI is the single source of truth.
 		log.Println("ad-hoc migrations applied")
+
+		// Index-coverage diagnostic: print every public-schema index covering
+		// the performance-critical hot columns. Read-only, runs once per
+		// boot. The output lets the operator confirm at a glance that the
+		// expected GORM-tag indexes (users.telegram_id uniqueIndex,
+		// subscriptions.user_id, room_members.user_id, donations.user_id)
+		// actually exist on prod — they were declared via struct tags and
+		// would only have been created by an AutoMigrate run at some past
+		// deploy. If a WARNING appears for a missing index, the next deploy
+		// should add an explicit CREATE INDEX IF NOT EXISTS for it.
+		hotColumns := []struct{ table, column string }{
+			{"users", "telegram_id"},
+			{"subscriptions", "user_id"},
+			{"subscriptions", "next_payment_at"},
+			{"room_members", "user_id"},
+			{"shared_rooms", "owner_id"},
+			{"donations", "user_id"},
+		}
+		for _, hc := range hotColumns {
+			var count int
+			err := sqlDB.QueryRow(`
+				SELECT COUNT(*)
+				FROM pg_indexes
+				WHERE schemaname = 'public'
+				  AND tablename = $1
+				  AND (indexdef ILIKE '%(' || $2 || ')%'
+				       OR indexdef ILIKE '%(' || $2 || ',%'
+				       OR indexdef ILIKE '%, ' || $2 || ')%'
+				       OR indexdef ILIKE '%, ' || $2 || ',%')`,
+				hc.table, hc.column).Scan(&count)
+			if err != nil {
+				log.Printf("[index-check] %s.%s — query error: %v", hc.table, hc.column, err)
+				continue
+			}
+			if count == 0 {
+				log.Printf("[index-check] WARNING: no index covers %s.%s — perf risk at scale", hc.table, hc.column)
+			} else {
+				log.Printf("[index-check] OK: %d index(es) cover %s.%s", count, hc.table, hc.column)
+			}
+		}
 	}
 
 	// Auto-migrate only in test/dev. Production should run a dedicated
@@ -248,8 +318,12 @@ func main() {
 	// Pool tuning — env-overridable for staging/load tests. Defaults sized
 	// for ~20 concurrent backend handlers + workers; bump POOL_SIZE if you
 	// see "max number of clients reached" in Redis logs.
-	opt.PoolSize = envInt("REDIS_POOL_SIZE", 20)
-	opt.MinIdleConns = envInt("REDIS_MIN_IDLE", 5)
+	// 40 conns covers the 50-DB-pool case where most HTTP handlers touch
+	// Redis (FX cache, rate-limit checks) plus the FX worker writes. Less
+	// headroom than DB pool because Redis ops are sub-ms — short hold
+	// times keep contention low.
+	opt.PoolSize = envInt("REDIS_POOL_SIZE", 40)
+	opt.MinIdleConns = envInt("REDIS_MIN_IDLE", 10)
 	opt.ReadTimeout = 10 * time.Second
 	opt.WriteTimeout = 10 * time.Second
 	rdb := redis.NewClient(opt)
@@ -381,6 +455,10 @@ func main() {
 		},
 	}))
 	app.Use(logger.New())
+	// Prometheus HTTP instrumentation — counts requests by templated
+	// path + status-class, records duration histogram. Mounted before
+	// CORS so 200-class CORS preflights also show up in the rate.
+	app.Use(observability.HTTPMiddleware())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: corsOrigins(cfg, isTestMode),
 		AllowHeaders: []string{"Content-Type", "X-Telegram-Init-Data"},
@@ -411,6 +489,12 @@ func main() {
 		}
 		return c.JSON(fiber.Map{"status": "ok", "db": dbStatus, "redis": redisStatus})
 	})
+
+	// ── Prometheus /metrics ──────────────────────────
+	// Public route by default — Prometheus scraping typically runs over
+	// an internal network. For exposed deployments, set METRICS_BEARER
+	// to require Authorization: Bearer <token> on the scrape.
+	app.Get("/metrics", adaptor.HTTPHandler(observability.MetricsHandler(os.Getenv("METRICS_BEARER"))))
 
 	// ── Webhook rate limit ─────────────────────────────
 	// /webhook routes are public (HMAC/secret verified inside the handler).
@@ -623,6 +707,64 @@ func sentryUserFromCtx(c fiber.Ctx) *observability.UserInfo {
 		TelegramID: u.TelegramID,
 		Username:   u.Username,
 	}
+}
+
+// setupSlog wires log/slog as the default logger and re-routes the
+// stdlib log package through it. After this call:
+//
+//   - slog.Info / slog.Error / etc. emit through the configured handler
+//   - the dozens of existing log.Printf call sites flow through the same
+//     handler, so the operator sees ONE stream — no half-JSON / half-text
+//     mix while the codebase migrates
+//
+// LOG_LEVEL accepts debug|info|warn|error (default info).
+// LOG_FORMAT=text picks the text handler (human-readable); anything
+// else (including empty) defaults to JSON for production scraping.
+func setupSlog() {
+	var lvl slog.Level
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
+	case "debug":
+		lvl = slog.LevelDebug
+	case "warn":
+		lvl = slog.LevelWarn
+	case "error":
+		lvl = slog.LevelError
+	default:
+		lvl = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: lvl}
+	var h slog.Handler
+	if strings.EqualFold(os.Getenv("LOG_FORMAT"), "text") {
+		h = slog.NewTextHandler(os.Stdout, opts)
+	} else {
+		h = slog.NewJSONHandler(os.Stdout, opts)
+	}
+	logger := slog.New(h)
+	slog.SetDefault(logger)
+
+	// Route stdlib log through slog so legacy log.Printf calls become
+	// structured records too. The log writer strips trailing newlines
+	// to avoid double-newline noise in JSON output.
+	log.SetFlags(0)
+	log.SetOutput(slogWriter{logger: logger})
+}
+
+// slogWriter adapts an io.Writer-style log.SetOutput target onto an
+// slog.Logger, so every log.Printf becomes a single slog.Info record
+// with the original message in the "msg" field. Anything starting with
+// "[error]" / "ERROR" routes through slog.Error so 5xx alerting on
+// log levels still works.
+type slogWriter struct{ logger *slog.Logger }
+
+func (s slogWriter) Write(p []byte) (int, error) {
+	msg := strings.TrimRight(string(p), "\n")
+	switch {
+	case strings.HasPrefix(msg, "[error]") || strings.HasPrefix(msg, "ERROR"):
+		s.logger.Error(msg)
+	default:
+		s.logger.Info(msg)
+	}
+	return len(p), nil
 }
 
 // envInt reads an integer env var with a fallback.

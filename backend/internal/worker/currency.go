@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/subguard/backend/internal/observability"
 )
 
 // CurrencyWorker fetches exchange rates daily and caches them in Redis.
@@ -65,6 +67,10 @@ func (w *CurrencyWorker) Start(ctx context.Context) {
 	}
 }
 
+// init-time check moved to the per-tick wrapper so the once-a-day
+// update both shows up in the metrics and helps detect "stuck for 25h"
+// from rate(tick_total) == 0 alerts.
+
 // ratesResponse covers both provider shapes:
 //   - open.er-api.com: { "result": "success", "rates": {...} }
 //   - exchangerate-api.com v6: { "result": "success", "conversion_rates": {...} }
@@ -78,6 +84,7 @@ type ratesResponse struct {
 }
 
 func (w *CurrencyWorker) update(ctx context.Context) {
+	defer observability.TimeWorkerTick("currency")()
 	select {
 	case <-ctx.Done():
 		return
