@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { UserSettings } from "@/types/subscription";
-import { Bell, Check, ChevronRight, Globe, Lock, Sparkles, Wallet } from "lucide-react";
+import { Bell, Check, ChevronRight, Globe, LifeBuoy, Lock, Sparkles, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { SUPPORTED_CURRENCIES, currencySymbol } from "@/lib/currencyRates";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -18,7 +18,7 @@ import { NotificationsSheet } from "./NotificationsSheet";
 import { PrivacySheet } from "./PrivacySheet";
 import { PremiumSheet } from "./PremiumSheet";
 import i18n from "@/lib/i18n";
-import { hapticImpact, hapticSelection } from "@/lib/telegram";
+import { hapticImpact, hapticSelection, openTelegramLink } from "@/lib/telegram";
 
 interface Props {
   settings: UserSettings;
@@ -123,6 +123,24 @@ export function SettingsView({ settings, user }: Props) {
       onClick: handleProClick,
     },
   ];
+
+  // Optional support contact — appended only when VITE_SUPPORT_URL is set.
+  // Accepts a full URL or a bare username / @username.
+  const supportRaw = (import.meta.env.VITE_SUPPORT_URL as string | undefined)?.trim();
+  if (supportRaw) {
+    const supportUrl = supportRaw.startsWith("http")
+      ? supportRaw
+      : `https://t.me/${supportRaw.replace(/^@/, "")}`;
+    items.push({
+      Icon: LifeBuoy,
+      label: t("settings.support"),
+      hint: t("settings.supportHint"),
+      onClick: () => {
+        hapticImpact("light");
+        openTelegramLink(supportUrl);
+      },
+    });
+  }
 
   return (
     <div className="px-5">

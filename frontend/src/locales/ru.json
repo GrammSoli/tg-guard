@@ -107,6 +107,8 @@
   "settings.pro": "Про-функции",
   "settings.proActive": "Активно",
   "settings.proUpgrade": "Улучшить",
+  "settings.support": "Поддержка",
+  "settings.supportHint": "Связаться с нами",
   "settings.admin": "Админ-панель",
   "settings.adminHint": "Управление",
   "settings.baseCurrency": "Базовая валюта",

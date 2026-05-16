@@ -107,6 +107,8 @@
   "settings.pro": "Pro features",
   "settings.proActive": "Active",
   "settings.proUpgrade": "Upgrade",
+  "settings.support": "Support",
+  "settings.supportHint": "Get in touch",
   "settings.admin": "Admin Panel",
   "settings.adminHint": "Manage users",
   "settings.baseCurrency": "Base Currency",
