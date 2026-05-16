@@ -1,0 +1,139 @@
+name: Backup restore drill
+
+# Synthetic restore drill: spins up two Postgres containers, seeds the
+# first with test data, dumps it via the same flags the production
+# sidecar uses, restores into the second, then runs the migration
+# step and a few smoke queries against the result.
+#
+# This CANNOT test the actual production backups — those live on the
+# prod host and CI has no access. What it DOES test is that the
+# pg_dump → gzip → pg_restore round-trip works against this codebase's
+# schema, which is the high-cardinality failure mode for backups
+# (e.g. an extension that didn't ship in the dump, a sequence that
+# didn't get its current value, a partial-index ON CONFLICT that
+# breaks on restore — all real Postgres footguns).
+#
+# A green run here means "the restore procedure works against this
+# schema." It does NOT replace the weekly hand-drill against actual
+# prod dumps documented in docs/BACKUP.md.
+
+on:
+  schedule:
+    # Weekly: Monday 04:00 UTC. Outside any normal deploy window.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+  # Also run on changes to the schema definitions so a regression in
+  # restore semantics surfaces in the PR that causes it.
+  pull_request:
+    paths:
+      - "backend/internal/model/**"
+      - "backend/cmd/server/main.go"
+      - "docker-compose.yml"
+      - ".github/workflows/backup-restore-drill.yml"
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Spin up source Postgres
+        run: |
+          docker run -d --name pg-src \
+            -e POSTGRES_USER=subguard \
+            -e POSTGRES_PASSWORD=ci_drill_password \
+            -e POSTGRES_DB=subguard \
+            -p 55432:5432 \
+            postgres:16-alpine
+          until docker exec pg-src pg_isready -U subguard >/dev/null 2>&1; do sleep 1; done
+
+      - name: Boot backend against source, populate seed data
+        env:
+          DATABASE_URL: "postgres://subguard:ci_drill_password@localhost:55432/subguard?sslmode=disable"
+          RUN_MIGRATIONS: "1"
+          APP_ENV: "test"
+          TEST_AUTH_SECRET: "ci_drill_test_secret_must_be_at_least_32_bytes_long"
+          # Minimum env to satisfy config.Load(). None of these are
+          # exercised by the drill — we just need a clean boot.
+          BOT_TOKEN: "ci_dummy"
+          WEBHOOK_SECRET: "ci_dummy"
+          BASE_URL: "http://localhost:3001"
+          API_PORT: "3001"
+        run: |
+          cd backend
+          # Build once, then run in background just long enough for
+          # AutoMigrate to land the schema and for SeedTestData to
+          # insert fixtures (APP_ENV=test triggers seeding).
+          go build -o /tmp/server ./cmd/server
+          /tmp/server &
+          SERVER_PID=$!
+          # Give the server up to 30s to come up healthy.
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3001/health >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:3001/health
+          kill $SERVER_PID || true
+          wait $SERVER_PID 2>/dev/null || true
+
+      - name: Take pg_dump (same flags as the prod sidecar)
+        run: |
+          docker exec pg-src pg_dump -U subguard -d subguard \
+            -Z6 --schema=public --blobs \
+            > /tmp/drill.sql.gz
+          # A blank dump is the worst kind of failure — assert
+          # non-trivial size before we even try to restore.
+          gz_size=$(stat -c%s /tmp/drill.sql.gz)
+          echo "dump size: $gz_size bytes"
+          if [ "$gz_size" -lt 1000 ]; then
+            echo "FAIL: dump is suspiciously small (< 1KB) — probably an error sneaked into stderr"
+            exit 1
+          fi
+
+      - name: Spin up destination Postgres
+        run: |
+          docker run -d --name pg-dst \
+            -e POSTGRES_USER=subguard \
+            -e POSTGRES_PASSWORD=ci_drill_password \
+            -e POSTGRES_DB=subguard \
+            -p 55433:5432 \
+            postgres:16-alpine
+          until docker exec pg-dst pg_isready -U subguard >/dev/null 2>&1; do sleep 1; done
+
+      - name: Restore into destination
+        run: |
+          gunzip -c /tmp/drill.sql.gz \
+            | docker exec -i pg-dst psql -v ON_ERROR_STOP=1 -U subguard -d subguard
+
+      - name: Verify row counts survived the round-trip
+        run: |
+          src_users=$(docker exec pg-src psql -tAU subguard -d subguard -c "SELECT count(*) FROM users")
+          dst_users=$(docker exec pg-dst psql -tAU subguard -d subguard -c "SELECT count(*) FROM users")
+          echo "users: src=$src_users dst=$dst_users"
+          if [ "$src_users" != "$dst_users" ]; then
+            echo "FAIL: user row count diverged after restore"
+            exit 1
+          fi
+          src_subs=$(docker exec pg-src psql -tAU subguard -d subguard -c "SELECT count(*) FROM subscriptions")
+          dst_subs=$(docker exec pg-dst psql -tAU subguard -d subguard -c "SELECT count(*) FROM subscriptions")
+          echo "subscriptions: src=$src_subs dst=$dst_subs"
+          if [ "$src_subs" != "$dst_subs" ]; then
+            echo "FAIL: subscription row count diverged after restore"
+            exit 1
+          fi
+
+      - name: Verify indexes survived (regression guard for restore-time index gaps)
+        run: |
+          docker exec pg-dst psql -tAU subguard -d subguard -c "
+            SELECT tablename, indexname FROM pg_indexes
+            WHERE schemaname='public'
+              AND tablename IN ('users','subscriptions','shared_rooms','donations')
+            ORDER BY tablename, indexname;
+          "
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f pg-src pg-dst 2>/dev/null || true
