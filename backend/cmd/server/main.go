@@ -339,8 +339,44 @@ func main() {
 
 	// ── Health check (no auth, outside /api/v1 to avoid group collision) ──
 	app.Get("/health", func(c fiber.Ctx) error {
-		return c.JSON(fiber.Map{"status": "ok"})
+		// Probe dependencies so k8s stops routing to a pod whose DB or
+		// Redis is unreachable. Bounded timeout keeps the probe itself
+		// from hanging when a dependency is slow rather than down.
+		ctx, cancel := context.WithTimeout(c.Context(), 2*time.Second)
+		defer cancel()
+
+		dbStatus := "up"
+		if sqlDB, err := db.DB(); err != nil || sqlDB.PingContext(ctx) != nil {
+			dbStatus = "down"
+		}
+		redisStatus := "up"
+		if rdb.Ping(ctx).Err() != nil {
+			redisStatus = "down"
+		}
+
+		if dbStatus == "down" || redisStatus == "down" {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"status": "degraded", "db": dbStatus, "redis": redisStatus,
+			})
+		}
+		return c.JSON(fiber.Map{"status": "ok", "db": dbStatus, "redis": redisStatus})
 	})
+
+	// ── Webhook rate limit ─────────────────────────────
+	// /webhook routes are public (HMAC/secret verified inside the handler).
+	// Telegram and CryptoPay deliver from a small IP set at a modest rate,
+	// so 600/min/IP sits far above real delivery volume while still blunting
+	// a junk flood that would otherwise burn CPU on signature checks.
+	// Telegram retries non-2xx, so a rare 429 self-heals. Prefix match on
+	// "/webhook" covers both /webhook and /webhook/crypto.
+	app.Use("/webhook", limiter.New(limiter.Config{
+		Max:          envInt("WEBHOOK_RATE_LIMIT", 600),
+		Expiration:   time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string { return "ip:" + c.IP() },
+		LimitReached: func(c fiber.Ctx) error {
+			return c.SendStatus(fiber.StatusTooManyRequests)
+		},
+	}))
 
 	// ── Webhook (no auth, secret verified inside) ──────
 	if !isTestMode {

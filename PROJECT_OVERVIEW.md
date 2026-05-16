@@ -87,7 +87,22 @@
 
 ---
 
-## 🚀 4. Развитие и Планы
+## 📘 4. Эксплуатация (Operations)
+
+Операционная документация для запуска и поддержки в production:
+
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — что делать при инцидентах (платёжный webhook, рассылка, БД, Redis, всплеск 5xx).
+- [`docs/MIGRATIONS.md`](docs/MIGRATIONS.md) — переход на golang-migrate и процедура baseline.
+- [`docs/PAYMENT_SMOKE_TEST.md`](docs/PAYMENT_SMOKE_TEST.md) — чеклист проверки оплат (Stars + Crypto) end-to-end.
+- [`docs/BACKUP_VERIFICATION.md`](docs/BACKUP_VERIFICATION.md) — проверка восстановления бэкапа БД.
+
+Health-check `/health` проверяет доступность PostgreSQL и Redis и возвращает
+`503`, если зависимость недоступна. CI (`.github/workflows/ci.yml`) гоняет
+build / vet / test / lint / tsc / build на каждый PR.
+
+---
+
+## 🚀 5. Развитие и Планы
 Текущий проект полностью завершен и готов к релизу (Release Candidate). Дальнейшее развитие может включать:
 1. **Экспорт аналитики**: Добавление кнопки выгрузки таблицы воронки трафика в CSV/Excel для маркетологов.
 2. **AI Парсинг Чеков**: Возможность прислать боту скриншот выписки из банка для автоматического добавления подписки в TMA.

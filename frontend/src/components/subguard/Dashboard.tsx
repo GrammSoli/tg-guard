@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useDeepLinkHandler } from "@/hooks/use-deep-link";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useNavigate } from "@tanstack/react-router";
@@ -18,9 +18,6 @@ import { SwipeableSubscriptionCard } from "./SwipeableSubscriptionCard";
 import { SponsoredOffers } from "./SponsoredOffers";
 import { TabBar, type TabKey } from "./TabBar";
 
-import { AnalyticsView } from "./AnalyticsView";
-import { CalendarView } from "./CalendarView";
-import { SettingsView } from "./SettingsView";
 import { SharedRooms } from "./SharedRooms";
 import { OnboardingSheet } from "./OnboardingSheet";
 import { EmptyDashboard } from "./EmptyDashboard";
@@ -38,6 +35,19 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useModalStore } from "@/stores/modalStore";
 import { usePaywallStore } from "@/stores/paywallStore";
 import { PremiumSheet } from "./PremiumSheet";
+
+// Non-dashboard tabs are lazy-loaded — AnalyticsView pulls in recharts and
+// CalendarView pulls in react-day-picker, neither of which is on the
+// initial-paint path. Splitting them keeps the entry chunk small.
+const AnalyticsView = lazy(() =>
+  import("./AnalyticsView").then((m) => ({ default: m.AnalyticsView })),
+);
+const CalendarView = lazy(() =>
+  import("./CalendarView").then((m) => ({ default: m.CalendarView })),
+);
+const SettingsView = lazy(() =>
+  import("./SettingsView").then((m) => ({ default: m.SettingsView })),
+);
 
 interface Props {
   user?: { name: string };
@@ -343,19 +353,37 @@ export function Dashboard({ user }: Props) {
 
         {tab === "calendar" && (
           <div className="mt-2">
-            {loading ? <CalendarSkeleton /> : <CalendarView subscriptions={items} onEdit={openEdit} />}
+            {loading ? (
+              <CalendarSkeleton />
+            ) : (
+              <Suspense fallback={<CalendarSkeleton />}>
+                <CalendarView subscriptions={items} onEdit={openEdit} />
+              </Suspense>
+            )}
           </div>
         )}
 
         {tab === "analytics" && (
           <div className="mt-2">
-            {loading ? <AnalyticsSkeleton /> : <AnalyticsView subscriptions={items} currency={settings.defaultCurrency} />}
+            {loading ? (
+              <AnalyticsSkeleton />
+            ) : (
+              <Suspense fallback={<AnalyticsSkeleton />}>
+                <AnalyticsView subscriptions={items} currency={settings.defaultCurrency} />
+              </Suspense>
+            )}
           </div>
         )}
 
         {tab === "settings" && (
           <div className="mt-2">
-            {loading ? <SettingsSkeleton /> : <SettingsView settings={settings} user={user} />}
+            {loading ? (
+              <SettingsSkeleton />
+            ) : (
+              <Suspense fallback={<SettingsSkeleton />}>
+                <SettingsView settings={settings} user={user} />
+              </Suspense>
+            )}
           </div>
         )}
 

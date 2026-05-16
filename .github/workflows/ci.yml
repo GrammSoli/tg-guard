@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      # Lint runs for visibility but is non-blocking: the repo carries a
+      # large pre-existing Prettier/ESLint backlog. Build, typecheck and
+      # tests are the hard gates; drop continue-on-error once lint is clean.
+      - run: npm run lint
+        continue-on-error: true
+      - run: npx tsc --noEmit
+      - run: npm run build

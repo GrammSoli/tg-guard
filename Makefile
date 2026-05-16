@@ -1,4 +1,4 @@
-.PHONY: dev build up down logs restart clean
+.PHONY: dev build up down logs restart clean migrate-up migrate-down migrate-version migrate-create migrate-baseline
 
 # ── Local development ─────────────────────────────
 dev-frontend:
@@ -51,3 +51,28 @@ db-shell:
 
 redis-shell:
 	docker compose exec redis redis-cli
+
+# ── Migrations (golang-migrate) ───────────────────
+# Install the CLI first:  brew install golang-migrate
+# Set DATABASE_URL, e.g.:
+#   export DATABASE_URL="postgres://subguard:PASS@localhost:5432/subguard?sslmode=disable"
+# See docs/MIGRATIONS.md for the baseline adoption procedure.
+MIGRATIONS_DIR := backend/migrations
+
+migrate-up:
+	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" up
+
+migrate-down:
+	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" down 1
+
+migrate-version:
+	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" version
+
+migrate-create:
+	@test -n "$(name)" || (echo "usage: make migrate-create name=add_foo" && exit 1)
+	migrate create -ext sql -dir $(MIGRATIONS_DIR) -seq $(name)
+
+# One-time: stamp an existing DB as already at the baseline version
+# WITHOUT running 000001 (the schema is already there). See docs/MIGRATIONS.md.
+migrate-baseline:
+	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" force 1
