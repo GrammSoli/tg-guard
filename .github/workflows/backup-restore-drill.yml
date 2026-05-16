@@ -116,6 +116,12 @@ jobs:
 
       - name: Restore into destination
         run: |
+          # pg_dump with --schema=public emits a CREATE SCHEMA public
+          # statement, which fails on a fresh Postgres because the
+          # schema already exists. Drop it first — same trick
+          # docs/BACKUP.md documents for disaster recovery.
+          docker exec pg-dst psql -v ON_ERROR_STOP=1 -U subguard -d subguard \
+            -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
           gunzip -c /tmp/drill.sql.gz \
             | docker exec -i pg-dst psql -v ON_ERROR_STOP=1 -U subguard -d subguard
 
