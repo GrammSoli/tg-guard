@@ -45,6 +45,18 @@ lint:
 test:
 	cd backend && go test ./...
 
+# Integration tests spin up a real Postgres via testcontainers-go to
+# exercise upsert / migration semantics that pure unit tests can't
+# fake. Tagged `integration` so `make test` stays fast and Docker-free.
+#
+# Local dev on Colima: macOS does NOT forward published container
+# ports by default, so the gorm-side dial fails with "connection
+# refused" even though the container booted fine. Fix:
+#   colima start --network-address
+# Docker Desktop and GitHub Actions runners work out of the box.
+test-integration:
+	cd backend && go test -tags=integration -timeout=300s ./...
+
 # ── Database ──────────────────────────────────────
 db-shell:
 	docker compose exec postgres psql -U subguard -d subguard
