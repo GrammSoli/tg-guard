@@ -37,6 +37,7 @@ import { ServiceCatalog } from "./ServiceCatalog";
 import { BrandIcon } from "./BrandIcon";
 import { type PopularService, SERVICE_CATEGORIES } from "@/lib/mockData";
 import { CalendarIcon, ChevronRight } from "lucide-react";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 interface Props {
   open: boolean;
@@ -48,9 +49,39 @@ interface Props {
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
+// isoDateInTz takes an RFC3339 timestamp (from the backend) and an IANA
+// timezone name, returns the calendar date ("yyyy-MM-dd") in THAT
+// timezone. A bare `iso.slice(0, 10)` returns the UTC date, which
+// disagrees with the user-intended date for timezones beyond ±12h
+// (Apia / Kiritimati / Tokelau on the eastern side; Baker Island on
+// the western, uninhabited side). Intl.DateTimeFormat does the
+// wall-clock conversion natively; the "en-CA" locale formats as
+// "yyyy-MM-dd" by default, which is exactly the shape the date
+// picker expects. Audit Tier-4 follow-up.
+function isoDateInTz(iso: string, tz: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz || "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    // Fallback: malformed timestamp or unknown tz — use the previous
+    // slice behaviour so we never break the editor over a display
+    // edge case.
+    return iso.slice(0, 10);
+  }
+}
+
 export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDelete }: Props) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
+  // User's stored timezone — used to format the editor's "yyyy-MM-dd"
+  // initial value from the backend's UTC RFC3339 timestamp. Without
+  // this conversion the date jumps by ±1 for users east of UTC+12 or
+  // west of UTC-11 (Apia / Kiritimati / Tokelau). Audit Tier-4 follow-up.
+  const userTimezone = useSettingsStore((s) => s.settings.timezone);
 
   const [step, setStep] = useState<"catalog" | "form">("catalog");
   const [name, setName] = useState("");
@@ -81,7 +112,7 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       setAmount(String(initial.amount));
       setCurrency(initial.currency);
       setPeriod(initial.period);
-      setNextDate(initial.next_payment_at.slice(0, 10));
+      setNextDate(isoDateInTz(initial.next_payment_at, userTimezone));
       setIsTrial(initial.is_trial);
       setAutoPay(initial.is_auto_pay);
     } else {
@@ -99,7 +130,7 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
       setIsTrial(false);
       setAutoPay(true);
     }
-  }, [open, initial]);
+  }, [open, initial, userTimezone]);
 
   const pickService = (s: PopularService) => {
     setName(s.name);
