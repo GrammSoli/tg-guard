@@ -950,7 +950,14 @@ func handleSuccessfulPayment(ctx context.Context, b *tgbot.Bot, update *models.U
 			Amount:                  payment.TotalAmount,
 		}
 		result := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "telegram_payment_charge_id"}},
+			Columns: []clause.Column{{Name: "telegram_payment_charge_id"}},
+			// idx_donations_charge_id is a PARTIAL unique index (WHERE
+			// telegram_payment_charge_id <> ''); the conflict target must
+			// repeat that predicate or Postgres rejects ON CONFLICT with
+			// 42P10 — it finds no matching arbiter index.
+			TargetWhere: clause.Where{Exprs: []clause.Expression{
+				clause.Expr{SQL: "telegram_payment_charge_id <> ''"},
+			}},
 			DoNothing: true,
 		}).Create(&donation)
 		if result.Error != nil {
