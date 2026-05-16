@@ -68,7 +68,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({
       <BrandIcon brand={s.brand} iconName={s.icon_name} iconColor={s.icon_color} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="truncate text-[15px] font-semibold">
+          <p className="min-w-0 truncate text-[15px] font-semibold">
             {s.name}
             {s.note && (
               <span className="ml-1 font-normal text-muted-foreground">
@@ -77,12 +77,12 @@ export const SubscriptionCard = memo(function SubscriptionCard({
             )}
           </p>
           {s.is_trial && (
-            <span className="bg-trial text-trial-foreground rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide">
+            <span className="bg-trial text-trial-foreground shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide">
               {t("card.trial")}
             </span>
           )}
           {!s.is_trial && s.is_auto_pay && (
-            <span className="bg-primary/15 text-primary rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide">
+            <span className="bg-primary/15 text-primary shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide">
               {t("card.autoPay")}
             </span>
           )}
