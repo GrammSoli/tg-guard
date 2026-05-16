@@ -11,6 +11,12 @@ export type FilterType = "subscription" | "room";
 
 export const DEFAULT_SORT: SortBy = "nextPayment";
 
+// Module-scoped double-submit guard for addSubscription. A boolean flag
+// is enough here — there's only one Create-form open at a time in the
+// UI (the AddSubscriptionSheet drawer), so concurrent legitimate calls
+// across users / tabs aren't possible in this client.
+let addSubscriptionInFlight = false;
+
 interface SubscriptionStore {
   items: Subscription[];
   loading: boolean;
@@ -78,6 +84,18 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
   },
 
   addSubscription: async (data) => {
+    // Single-flight guard. AddSubscriptionSheet calls onSave and then
+    // immediately closes; a user who manages to tap "Save" twice before
+    // the close animation runs (or whose tap fires a synthetic double
+    // event on shaky Android touch panels) would otherwise issue TWO
+    // identical POSTs and create TWO identical subscription rows. The
+    // backend has no per-(user, name, amount) uniqueness constraint we
+    // could rely on. Audit Tier-2 #3.
+    if (addSubscriptionInFlight) {
+      console.warn("[subscriptionStore] addSubscription already in flight, ignoring duplicate");
+      return;
+    }
+    addSubscriptionInFlight = true;
     try {
       const created = await api<Subscription>("/subscriptions", {
         method: "POST",
@@ -87,6 +105,8 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
     } catch (err) {
       set({ error: (err as Error).message });
       throw err;
+    } finally {
+      addSubscriptionInFlight = false;
     }
   },
 

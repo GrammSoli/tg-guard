@@ -181,12 +181,29 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
     }
   };
 
-  const handleCopyInvite = () => {
+  const handleCopyInvite = async () => {
     if (!room) return;
     const link = `https://t.me/${botUsername}/${appShortname}?startapp=room_${room.invite_code}`;
-    navigator.clipboard?.writeText(link);
-    hapticNotification("success");
-    toast.success(t("room.copyInvite"));
+    // Branch defensively — `navigator.clipboard` is undefined in older
+    // WebViews / non-secure contexts and `writeText` itself can reject
+    // (permission denied, no focus). Previously we fired a SUCCESS
+    // toast unconditionally even when the copy silently failed, so the
+    // user thought they had the link in their clipboard but they had
+    // whatever was there before. Audit Tier-2 #5.
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(link);
+      hapticNotification("success");
+      toast.success(t("room.copyInvite"));
+    } catch (err) {
+      console.warn("[room.copyInvite] clipboard write failed:", err);
+      hapticNotification("error");
+      // Fall back to a "tap-to-select" toast that shows the link inline
+      // so the user can at least long-press it.
+      toast.error(t("toast.copyFailed", "Tap and hold the link to copy: {{link}}", { link }));
+    }
   };
 
   const handleAddService = async (p: (typeof POPULAR_SERVICES)[number], note?: string) => {
@@ -396,8 +413,14 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
               </div>
               <div className="flex-1">
                 <p className="text-xs font-semibold">{t("room.inviteLink")}</p>
+                {/* Show the SAME link that handleCopyInvite copies —
+                    invite_code, not room.id. Previously the visible
+                    label used room.id (UUID) while the clipboard got
+                    the short invite_code, so what the user saw and
+                    what they pasted were two different links. Audit
+                    Tier-2 #5. */}
                 <p className="text-[11px] text-muted-foreground">
-                  t.me/{botUsername}/{appShortname}?startapp=room_{room.id}
+                  t.me/{botUsername}/{appShortname}?startapp=room_{room.invite_code}
                 </p>
               </div>
             </button>

@@ -44,11 +44,19 @@ export class ApiError extends Error {
   }
 }
 
-// Coalesce concurrent 401 toasts. We deliberately do NOT auto-reload: an
-// auto-reload on a persistently-401 backend produces an infinite reload
-// loop inside the Telegram WebView. The user can close + reopen the bot
-// manually; surfacing one clear toast is enough.
-let sessionExpiredHandled = false;
+// Debounce 401 toasts so a burst of concurrent requests (dashboard
+// open → 5 GETs land at once → all 401) raises ONE toast, not five.
+// We deliberately do NOT auto-reload: an auto-reload on a persistently-
+// 401 backend produces an infinite reload loop inside the Telegram
+// WebView. The user can close + reopen the bot manually.
+//
+// Previously this was a one-shot boolean that never reset, so a 401
+// happening hours after the first one (transient blip → user comes back
+// → session re-expires) was silently swallowed without any UI signal.
+// Replacing with a timestamp lets the toast reappear after a quiet
+// window. Audit Tier-2 #1.
+const sessionExpiredDebounceMs = 30_000;
+let lastSessionExpiredAt = 0;
 
 // Global flag set when the server returns 403 account_banned.
 // Uses Zustand so React components reactively re-render.
@@ -82,8 +90,9 @@ export const useMaintenanceStore = create<MaintenanceStore>((set) => ({
 }));
 
 function handleSessionExpired() {
-  if (sessionExpiredHandled) return;
-  sessionExpiredHandled = true;
+  const now = Date.now();
+  if (now - lastSessionExpiredAt < sessionExpiredDebounceMs) return;
+  lastSessionExpiredAt = now;
   import("sonner").then(({ toast }) => {
     toast.error("Session expired — please reopen the bot");
   }).catch(() => { /* noop */ });
@@ -105,7 +114,11 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
         "X-Telegram-Init-Data": getInitData(),
         ...extraHeaders,
       },
-      body: body ? JSON.stringify(body) : undefined,
+      // Skip body only for undefined / null. `body ? …` would also
+      // skip 0 / false / "" — fine for the current callers (all pass
+      // objects) but a foot-gun if any future endpoint takes a bare
+      // primitive payload. Audit Tier-2 #2.
+      body: body != null ? JSON.stringify(body) : undefined,
       signal,
     });
   } catch (err) {
