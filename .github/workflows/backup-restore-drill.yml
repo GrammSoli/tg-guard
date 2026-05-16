@@ -47,9 +47,21 @@ jobs:
             postgres:16-alpine
           until docker exec pg-src pg_isready -U subguard >/dev/null 2>&1; do sleep 1; done
 
+      - name: Spin up Redis
+        # The backend refuses to start without a reachable Redis (FX
+        # cache, rate-limit state, broadcast locks). Drill doesn't
+        # exercise Redis paths, but the boot wouldn't get past
+        # observability.Init without it.
+        run: |
+          docker run -d --name redis-drill \
+            -p 56379:6379 \
+            redis:7-alpine
+          until docker exec redis-drill redis-cli ping >/dev/null 2>&1; do sleep 1; done
+
       - name: Boot backend against source, populate seed data
         env:
           DATABASE_URL: "postgres://subguard:ci_drill_password@localhost:55432/subguard?sslmode=disable"
+          REDIS_URL: "redis://localhost:56379/0"
           RUN_MIGRATIONS: "1"
           APP_ENV: "test"
           TEST_AUTH_SECRET: "ci_drill_test_secret_must_be_at_least_32_bytes_long"
@@ -136,4 +148,4 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          docker rm -f pg-src pg-dst 2>/dev/null || true
+          docker rm -f pg-src pg-dst redis-drill 2>/dev/null || true

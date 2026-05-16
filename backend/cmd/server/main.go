@@ -237,46 +237,6 @@ func main() {
 		// already backfills existing rows on PG 11+, and from this
 		// deploy onwards the admin UI is the single source of truth.
 		log.Println("ad-hoc migrations applied")
-
-		// Index-coverage diagnostic: print every public-schema index covering
-		// the performance-critical hot columns. Read-only, runs once per
-		// boot. The output lets the operator confirm at a glance that the
-		// expected GORM-tag indexes (users.telegram_id uniqueIndex,
-		// subscriptions.user_id, room_members.user_id, donations.user_id)
-		// actually exist on prod — they were declared via struct tags and
-		// would only have been created by an AutoMigrate run at some past
-		// deploy. If a WARNING appears for a missing index, the next deploy
-		// should add an explicit CREATE INDEX IF NOT EXISTS for it.
-		hotColumns := []struct{ table, column string }{
-			{"users", "telegram_id"},
-			{"subscriptions", "user_id"},
-			{"subscriptions", "next_payment_at"},
-			{"room_members", "user_id"},
-			{"shared_rooms", "owner_id"},
-			{"donations", "user_id"},
-		}
-		for _, hc := range hotColumns {
-			var count int
-			err := sqlDB.QueryRow(`
-				SELECT COUNT(*)
-				FROM pg_indexes
-				WHERE schemaname = 'public'
-				  AND tablename = $1
-				  AND (indexdef ILIKE '%(' || $2 || ')%'
-				       OR indexdef ILIKE '%(' || $2 || ',%'
-				       OR indexdef ILIKE '%, ' || $2 || ')%'
-				       OR indexdef ILIKE '%, ' || $2 || ',%')`,
-				hc.table, hc.column).Scan(&count)
-			if err != nil {
-				log.Printf("[index-check] %s.%s — query error: %v", hc.table, hc.column, err)
-				continue
-			}
-			if count == 0 {
-				log.Printf("[index-check] WARNING: no index covers %s.%s — perf risk at scale", hc.table, hc.column)
-			} else {
-				log.Printf("[index-check] OK: %d index(es) cover %s.%s", count, hc.table, hc.column)
-			}
-		}
 	}
 
 	// Auto-migrate only in test/dev. Production should run a dedicated
@@ -300,6 +260,48 @@ func main() {
 		log.Println("migrations applied")
 	} else {
 		log.Println("skipping AutoMigrate (set RUN_MIGRATIONS=1 to enable)")
+	}
+
+	// Index-coverage diagnostic. Runs AFTER both migration paths (ad-hoc
+	// runMigration in prod, AutoMigrate in test/dev) so it always sees
+	// the final schema. The output lets the operator confirm at a glance
+	// that GORM-tag indexes (users.telegram_id uniqueIndex,
+	// subscriptions.user_id, room_members.user_id, donations.user_id)
+	// actually exist — they were declared via struct tags and would
+	// only have been created by an AutoMigrate run at some past deploy.
+	// A WARNING here is the signal to add an explicit
+	// CREATE INDEX IF NOT EXISTS in the next deploy.
+	if sqlDB, err := db.DB(); err == nil {
+		hotColumns := []struct{ table, column string }{
+			{"users", "telegram_id"},
+			{"subscriptions", "user_id"},
+			{"subscriptions", "next_payment_at"},
+			{"room_members", "user_id"},
+			{"shared_rooms", "owner_id"},
+			{"donations", "user_id"},
+		}
+		for _, hc := range hotColumns {
+			var count int
+			qerr := sqlDB.QueryRow(`
+				SELECT COUNT(*)
+				FROM pg_indexes
+				WHERE schemaname = 'public'
+				  AND tablename = $1
+				  AND (indexdef ILIKE '%(' || $2 || ')%'
+				       OR indexdef ILIKE '%(' || $2 || ',%'
+				       OR indexdef ILIKE '%, ' || $2 || ')%'
+				       OR indexdef ILIKE '%, ' || $2 || ',%')`,
+				hc.table, hc.column).Scan(&count)
+			if qerr != nil {
+				log.Printf("[index-check] %s.%s — query error: %v", hc.table, hc.column, qerr)
+				continue
+			}
+			if count == 0 {
+				log.Printf("[index-check] WARNING: no index covers %s.%s — perf risk at scale", hc.table, hc.column)
+			} else {
+				log.Printf("[index-check] OK: %d index(es) cover %s.%s", count, hc.table, hc.column)
+			}
+		}
 	}
 
 	// Seed catalog data

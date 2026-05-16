@@ -114,18 +114,26 @@ func TestAuthIntegration_ExistingUser_PreservesSettings(t *testing.T) {
 	// Seed: pretend this user logged in once already AND set non-default
 	// preferences via PATCH /me.
 	preexisting := model.User{
-		TelegramID:           22222,
-		FirstName:            "Old",
-		Username:             "oldname",
-		Timezone:             "Europe/Moscow",
-		Locale:               "ru",
-		BaseCurrency:         "EUR",
-		NotificationTime:     "08:30",
-		NotificationsEnabled: false,
-		IsDonator:            true,
+		TelegramID:       22222,
+		FirstName:        "Old",
+		Username:         "oldname",
+		Timezone:         "Europe/Moscow",
+		Locale:           "ru",
+		BaseCurrency:     "EUR",
+		NotificationTime: "08:30",
+		IsDonator:        true,
 	}
 	if err := db.Create(&preexisting).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
+	}
+	// NotificationsEnabled has `gorm:"default:true"`, and Go's bool
+	// zero-value (false) is indistinguishable from "field not set" at
+	// the INSERT layer — so a struct-literal false silently becomes
+	// the DB default true. Force the value with a follow-up update so
+	// the test fixture actually exercises the "user explicitly disabled
+	// notifications" branch.
+	if err := db.Model(&preexisting).UpdateColumn("notifications_enabled", false).Error; err != nil {
+		t.Fatalf("seed notifications_enabled=false: %v", err)
 	}
 
 	// New initData arrives with refreshed profile fields (different
