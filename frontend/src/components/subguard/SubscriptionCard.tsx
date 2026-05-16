@@ -41,16 +41,25 @@ export const SubscriptionCard = memo(function SubscriptionCard({
   // Convert to user's preferred currency
   const displayAmount = convertCurrency(s.amount, s.currency, userCurrency);
 
-  // Overdue = next_payment_at is strictly before today's midnight (i.e.
-  // it was due yesterday or earlier). Trials don't get the overdue badge —
-  // an expired trial is a separate UX concern.
   const todayMidnight = new Date();
   todayMidnight.setHours(0, 0, 0, 0);
+
+  // A subscription counts as "on trial" only while trial_ends_at is still
+  // in the future. Once it passes, the trial is over: the card behaves like
+  // a regular subscription (and can go Overdue) instead of showing a stale
+  // "Trial ends on <past date>" with no overdue treatment.
+  const trialActive =
+    s.is_trial &&
+    !!s.trial_ends_at &&
+    new Date(s.trial_ends_at).getTime() >= todayMidnight.getTime();
+
+  // Overdue = next_payment_at is strictly before today's midnight (due
+  // yesterday or earlier). An active trial is exempt; an expired one is not.
   const isOverdue =
-    !s.is_trial && new Date(s.next_payment_at).getTime() < todayMidnight.getTime();
+    !trialActive && new Date(s.next_payment_at).getTime() < todayMidnight.getTime();
 
   let dateLabel: string;
-  if (s.is_trial && s.trial_ends_at) {
+  if (trialActive && s.trial_ends_at) {
     dateLabel = `${t("card.trialEndsOn")} ${formatDate(s.trial_ends_at, lc)}`;
   } else if (isOverdue) {
     dateLabel = `${t("card.overdue")} (${formatDate(s.next_payment_at, lc)})`;
@@ -76,12 +85,12 @@ export const SubscriptionCard = memo(function SubscriptionCard({
               </span>
             )}
           </p>
-          {s.is_trial && (
+          {trialActive && (
             <span className="bg-trial text-trial-foreground shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide">
               {t("card.trial")}
             </span>
           )}
-          {!s.is_trial && s.is_auto_pay && (
+          {!trialActive && s.is_auto_pay && (
             <span className="bg-primary/15 text-primary shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide">
               {t("card.autoPay")}
             </span>
@@ -96,7 +105,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({
         </p>
       </div>
       <div className="flex items-center gap-2">
-        {!s.is_auto_pay && !s.is_trial && (
+        {!s.is_auto_pay && !trialActive && (
           <Clock3 className="h-4 w-4 text-muted-foreground" />
         )}
         <p className="text-base font-bold tabular-nums">
