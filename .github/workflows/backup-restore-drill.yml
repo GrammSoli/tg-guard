@@ -128,11 +128,13 @@ jobs:
         run: |
           # pg_dump with --schema=public emits a CREATE SCHEMA public
           # statement, which fails on a fresh Postgres because the
-          # schema already exists. Drop it first — same trick
-          # docs/BACKUP.md documents for disaster recovery.
+          # schema already exists. Drop it first WITHOUT recreating —
+          # the dump's own CREATE SCHEMA does that. (If we DROP+CREATE
+          # here, the dump's CREATE then fails on our freshly created
+          # one.)
           docker exec -e PGPASSWORD=ci_drill_password pg-dst \
             psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U subguard -d subguard \
-            -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+            -c "DROP SCHEMA public CASCADE;"
           gunzip -c /tmp/drill.sql.gz \
             | docker exec -i -e PGPASSWORD=ci_drill_password pg-dst \
               psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U subguard -d subguard
