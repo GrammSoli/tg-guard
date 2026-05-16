@@ -93,7 +93,10 @@ type SharedRoom struct {
 	// restart) is a no-op instead of clobbering payments members made in
 	// the interim. Not exposed in JSON; purely worker bookkeeping.
 	LastBillingResetAt *time.Time `json:"-"`
-	CreatedAt          time.Time  `json:"created_at"`
+	// LastBillingReminderAt is the once-per-day idempotency stamp for the
+	// day-before-billing reminder, written by RoomReminderWorker.
+	LastBillingReminderAt *time.Time `json:"-"`
+	CreatedAt             time.Time  `json:"created_at"`
 	// CASCADE so DELETE FROM shared_rooms cleans up children at DB layer.
 	// handler.DeleteRoom still wraps the manual deletes in a transaction;
 	// this is defence in depth against direct SQL writes.

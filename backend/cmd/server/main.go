@@ -139,6 +139,10 @@ func main() {
 		// get NULL and will be reset on the first eligible tick — that
 		// matches the previous behaviour, no surprise resets.
 		runMigration("shared_rooms.last_billing_reset_at", `ALTER TABLE shared_rooms ADD COLUMN IF NOT EXISTS last_billing_reset_at TIMESTAMPTZ`)
+		// Idempotency stamp for the room-reminder worker (day-before-billing
+		// DMs). Existing rooms get NULL and are simply reminded on their
+		// next eligible day — no backfill needed.
+		runMigration("shared_rooms.last_billing_reminder_at", `ALTER TABLE shared_rooms ADD COLUMN IF NOT EXISTS last_billing_reminder_at TIMESTAMPTZ`)
 		// Performance indexes (audit Tier-3 #1, #2):
 		//
 		//   idx_sub_due_unsent — covers the notification worker's hot
@@ -309,6 +313,15 @@ func main() {
 	go func() {
 		defer workerWG.Done()
 		workerutil.Supervise("premium-expiration", func() { premiumWorker.Start(ctx) })
+	}()
+
+	// Room-reminder worker — DMs every member the day before their room's
+	// monthly billing_day. Runs once daily at ROOM_REMINDER_HOUR (UTC).
+	roomReminderWorker := worker.NewRoomReminderWorker(db, n, cfg.BaseURL, envInt("ROOM_REMINDER_HOUR", 9))
+	workerWG.Add(1)
+	go func() {
+		defer workerWG.Done()
+		workerutil.Supervise("room-reminder", func() { roomReminderWorker.Start(ctx) })
 	}()
 
 	// ── Fiber app ──────────────────────────────────────
