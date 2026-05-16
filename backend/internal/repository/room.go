@@ -19,6 +19,14 @@ func NewRoomRepo(db *gorm.DB) *RoomRepo {
 	return &RoomRepo{db: db}
 }
 
+// DB exposes the underlying *gorm.DB for callers that need to issue a
+// transaction spanning repo logic and ad-hoc queries (e.g. the paywall
+// FOR UPDATE wrap in handler/room.go Create). Avoid using outside that
+// narrow case — prefer adding a named method on the repo instead.
+func (r *RoomRepo) DB() *gorm.DB {
+	return r.db
+}
+
 func (r *RoomRepo) ListByUser(userID uint) ([]model.SharedRoom, error) {
 	var rooms []model.SharedRoom
 	err := r.db.
@@ -65,7 +73,7 @@ func (r *RoomRepo) GetByInviteCode(code string) (*model.SharedRoom, error) {
 }
 
 func (r *RoomRepo) Create(room *model.SharedRoom) error {
-	room.InviteCode = generateInviteCode()
+	room.InviteCode = GenerateInviteCode()
 	return r.db.Create(room).Error
 }
 
@@ -152,7 +160,11 @@ func (r *RoomRepo) UpdateBillingDay(roomID uuid.UUID, day int) error {
 
 const inviteChars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghkmnpqrstuvwxyz23456789"
 
-func generateInviteCode() string {
+// GenerateInviteCode produces a 12-char alphanumeric token from a
+// confusables-safe alphabet (no 0/O/1/I/l). Exported so the
+// handler/room.go paywall-locked Create can generate within the tx
+// without an extra repo round-trip.
+func GenerateInviteCode() string {
 	code := make([]byte, 12)
 	for i := range code {
 		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(inviteChars))))

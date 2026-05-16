@@ -473,7 +473,14 @@ func globalErrorHandler(c fiber.Ctx, err error) error {
 	// re-capturing here is harmless: Sentry dedups by fingerprint.
 	if code >= 500 {
 		observability.CaptureHTTPError(c.Method(), c.Path(), code, sentryUserFromCtx(c), err)
+		// 5xx bodies are exposed to the public mini-app — don't leak
+		// stack traces, raw DB errors, or upstream URLs in the body.
+		// The full err is in logs + Sentry; the client just needs a
+		// stable code it can branch on. Audit Tier-1 #6.
+		return c.Status(code).JSON(fiber.Map{"error": "internal_error"})
 	}
+	// 4xx and 3xx — surface the original message; these are client-
+	// actionable (validation failures, not-found, etc.).
 	return c.Status(code).JSON(fiber.Map{"error": err.Error()})
 }
 

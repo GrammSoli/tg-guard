@@ -43,8 +43,23 @@ func (h *RecommendationsHandler) List(c fiber.Ctx) error {
 	return c.JSON(offers)
 }
 
+// callerLocale returns the authenticated user's locale, defaulting to
+// "en" when the user has no locale set yet. Used by Track* handlers to
+// scope counter increments to offers the caller could legitimately see.
+func callerLocale(c fiber.Ctx) string {
+	if user := middleware.UserFromCtx(c); user != nil && user.Locale != "" {
+		return user.Locale
+	}
+	return "en"
+}
+
 // TrackView increments the view counter for a batch of offer IDs.
 // POST /api/v1/recommendations/track/view  { "ids": [1, 2, 3] }
+//
+// The counter UPDATE is filtered by the caller's locale + is_active
+// inside the repo so an EN user firing TrackView with RU offer IDs
+// (which they'd never see in List anyway) inflates nothing. Audit
+// Tier-1 #7.
 func (h *RecommendationsHandler) TrackView(c fiber.Ctx) error {
 	var body struct {
 		IDs []uint `json:"ids"`
@@ -58,11 +73,12 @@ func (h *RecommendationsHandler) TrackView(c fiber.Ctx) error {
 		body.IDs = body.IDs[:50]
 	}
 	log.Printf("[track/view] incrementing views for IDs: %v", body.IDs)
-	h.repo.IncrementViews(body.IDs)
+	h.repo.IncrementViews(body.IDs, callerLocale(c))
 	return c.JSON(fiber.Map{"ok": true})
 }
 
-// TrackClick increments the click counter for a single offer.
+// TrackClick increments the click counter for a single offer. Same
+// locale + is_active guard as TrackView.
 // POST /api/v1/recommendations/:id/track/click
 func (h *RecommendationsHandler) TrackClick(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
@@ -70,6 +86,6 @@ func (h *RecommendationsHandler) TrackClick(c fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid id"})
 	}
 	log.Printf("[track/click] incrementing click for ID: %d", id)
-	h.repo.IncrementClick(uint(id))
+	h.repo.IncrementClick(uint(id), callerLocale(c))
 	return c.JSON(fiber.Map{"ok": true})
 }

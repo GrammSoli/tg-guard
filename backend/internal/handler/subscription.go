@@ -1,17 +1,25 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/subguard/backend/internal/middleware"
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/repository"
 )
+
+// errPaywallLimit is the in-tx sentinel for "subscription create denied
+// by paywall." Surfaced out of Create's transaction closure via errors.Is
+// so the surrounding handler can format the 403 response without
+// reaching back into the closure for the count/limit values.
+var errPaywallLimit = errors.New("paywall_limit")
 
 // parseUserDate normalises an incoming next_payment_at / trial_ends_at
 // string to a wall-clock anchored at NOON in the user's stored
@@ -99,21 +107,6 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
 
-	// ── Paywall enforcement ────────────────────────────
-	if !user.IsDonator {
-		settings, err := h.adminRepo.GetSettings()
-		if err == nil && settings.PaywallEnabled {
-			count, cerr := h.adminRepo.CountUserSubscriptions(user.ID)
-			if cerr == nil && count >= int64(settings.FreeSubsLimit) {
-				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-					"error": "paywall_limit",
-					"limit": settings.FreeSubsLimit,
-					"count": count,
-				})
-			}
-		}
-	}
-
 	var body struct {
 		Name          string  `json:"name"`
 		Brand         string  `json:"brand"`
@@ -164,7 +157,47 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
-	if err := h.repo.Create(&sub); err != nil {
+	// Paywall + Create wrapped in a tx with SELECT … FOR UPDATE on the
+	// user row. Without the lock two concurrent POST /subscriptions for
+	// the same user could BOTH pass `count < limit` and BOTH insert,
+	// overshooting the free-tier cap. Locking the user row makes the
+	// COUNT-then-INSERT pair serialized per user (other users are
+	// unaffected), and rolling back the tx on `errPaywallLimit` keeps
+	// the count check authoritative even under contention.
+	// Audit Tier-1 #4.
+	var paywallCount, paywallLimit int64
+	txErr := h.db.Transaction(func(tx *gorm.DB) error {
+		var locked model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", user.ID).First(&locked).Error; err != nil {
+			return fmt.Errorf("lock user: %w", err)
+		}
+		if !locked.IsDonator {
+			settings, sErr := h.adminRepo.GetSettings()
+			if sErr == nil && settings.PaywallEnabled {
+				var count int64
+				if err := tx.Model(&model.Subscription{}).
+					Where("user_id = ?", user.ID).
+					Count(&count).Error; err != nil {
+					return fmt.Errorf("count subs: %w", err)
+				}
+				if count >= int64(settings.FreeSubsLimit) {
+					paywallCount = count
+					paywallLimit = int64(settings.FreeSubsLimit)
+					return errPaywallLimit
+				}
+			}
+		}
+		return tx.Create(&sub).Error
+	})
+	if errors.Is(txErr, errPaywallLimit) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "paywall_limit",
+			"limit": paywallLimit,
+			"count": paywallCount,
+		})
+	}
+	if txErr != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create subscription"})
 	}
 

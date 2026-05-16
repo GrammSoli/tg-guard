@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/subguard/backend/internal/middleware"
 	"github.com/subguard/backend/internal/model"
@@ -109,21 +111,6 @@ func (h *RoomHandler) refreshAndReturn(c fiber.Ctx, roomID uuid.UUID, callerID u
 func (h *RoomHandler) Create(c fiber.Ctx) error {
 	user := middleware.UserFromCtx(c)
 
-	// ── Paywall enforcement ────────────────────────────
-	if !user.IsDonator {
-		settings, err := h.adminRepo.GetSettings()
-		if err == nil && settings.PaywallEnabled {
-			count, cerr := h.adminRepo.CountUserOwnedRooms(user.ID)
-			if cerr == nil && count >= int64(settings.FreeRoomLimit) {
-				return c.Status(403).JSON(fiber.Map{
-					"error": "paywall_limit",
-					"limit": settings.FreeRoomLimit,
-					"count": count,
-				})
-			}
-		}
-	}
-
 	var body struct {
 		Name     string `json:"name"`
 		Currency string `json:"currency"`
@@ -153,7 +140,50 @@ func (h *RoomHandler) Create(c fiber.Ctx) error {
 			Note: s.Note, IconName: s.IconName, IconColor: s.IconColor,
 		})
 	}
-	if err := h.repo.Create(&room); err != nil {
+
+	// Paywall + Create wrapped in a tx with SELECT … FOR UPDATE on the
+	// user (owner) row. Without the lock two concurrent POST /rooms for
+	// the same user could BOTH pass `count < limit` and BOTH insert,
+	// overshooting the free-tier cap. Mirrors handler/subscription.go's
+	// fix for the same race. Audit Tier-1 #4.
+	var paywallCount, paywallLimit int64
+	txErr := h.repo.DB().Transaction(func(tx *gorm.DB) error {
+		var locked model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", user.ID).First(&locked).Error; err != nil {
+			return fmt.Errorf("lock user: %w", err)
+		}
+		if !locked.IsDonator {
+			settings, sErr := h.adminRepo.GetSettings()
+			if sErr == nil && settings.PaywallEnabled {
+				var count int64
+				if err := tx.Model(&model.SharedRoom{}).
+					Where("owner_id = ?", user.ID).
+					Count(&count).Error; err != nil {
+					return fmt.Errorf("count rooms: %w", err)
+				}
+				if count >= int64(settings.FreeRoomLimit) {
+					paywallCount = count
+					paywallLimit = int64(settings.FreeRoomLimit)
+					return errPaywallLimit
+				}
+			}
+		}
+		// Generate the invite code + insert via tx (mirrors RoomRepo.Create
+		// but inside the locked transaction so other concurrent invite-code
+		// generators don't clash on the unique index).
+		room.InviteCode = repository.GenerateInviteCode()
+		return tx.Create(&room).Error
+	})
+	if errors.Is(txErr, errPaywallLimit) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "paywall_limit",
+			"limit": paywallLimit,
+			"count": paywallCount,
+		})
+	}
+	if txErr != nil {
+		log.Printf("[room.Create] user=%d tx error: %v", user.ID, txErr)
 		return c.Status(500).JSON(fiber.Map{"error": "create failed"})
 	}
 	return c.Status(201).JSON(roomSummary(&room))
@@ -165,8 +195,29 @@ func (h *RoomHandler) Join(c fiber.Ctx) error {
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "bad invite"})
 	}
-	if !h.repo.IsMember(room.ID, user.ID) {
-		h.repo.AddMember(&model.RoomMember{RoomID: room.ID, UserID: user.ID, Name: user.FirstName, Username: user.Username, Avatar: user.PhotoURL})
+	// Atomic membership insert. The previous "IsMember? AddMember"
+	// pair had a TOCTOU window where two concurrent Join calls (same
+	// invite link tapped twice from a flaky network, or different tabs)
+	// both passed the EXISTS check and then raced on the (RoomID, UserID)
+	// composite primary key — one of them surfaced a 200 to the client
+	// despite the INSERT having failed inside a swallowed
+	// AddMember-without-error-check call. The ON CONFLICT DO NOTHING
+	// path makes the duplicate a silent no-op AND keeps the error
+	// channel honest for real failures (DB outage, etc.).
+	// Audit Tier-1 #5.
+	member := model.RoomMember{
+		RoomID:   room.ID,
+		UserID:   user.ID,
+		Name:     user.FirstName,
+		Username: user.Username,
+		Avatar:   user.PhotoURL,
+	}
+	if err := h.repo.DB().Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "room_id"}, {Name: "user_id"}},
+		DoNothing: true,
+	}).Create(&member).Error; err != nil {
+		log.Printf("[room.Join] room=%s user=%d add member error: %v", room.ID, user.ID, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "join failed"})
 	}
 	return c.JSON(roomSummary(room))
 }

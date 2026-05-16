@@ -371,18 +371,32 @@ func (r *AdminRepo) DeleteOffer(id uint) error {
 	return r.db.Delete(&model.SponsoredOffer{}, id).Error
 }
 
-func (r *AdminRepo) IncrementViews(ids []uint) error {
+// IncrementViews bumps `views` for the given offer IDs, but ONLY for
+// offers that (a) are currently active and (b) target the caller's
+// language (or are tagged "all"). This kills two abuse classes that
+// the previous unguarded UPDATE was vulnerable to:
+//
+//   - An EN-locale user firing TrackView with the IDs of every RU
+//     offer they'd never legitimately see, inflating impressions.
+//   - A bot crawling for offer IDs and crunching counters at scale.
+//
+// Audit Tier-1 #7.
+func (r *AdminRepo) IncrementViews(ids []uint, locale string) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	return r.db.Model(&model.SponsoredOffer{}).
-		Where("id IN ?", ids).
+		Where("id IN ? AND is_active = ? AND (target_language = ? OR target_language = ?)",
+			ids, true, locale, "all").
 		UpdateColumn("views", gorm.Expr("views + 1")).Error
 }
 
-func (r *AdminRepo) IncrementClick(id uint) error {
+// IncrementClick bumps `clicks` for one offer iff it's active and
+// targets the caller's locale (same constraint as IncrementViews).
+func (r *AdminRepo) IncrementClick(id uint, locale string) error {
 	return r.db.Model(&model.SponsoredOffer{}).
-		Where("id = ?", id).
+		Where("id = ? AND is_active = ? AND (target_language = ? OR target_language = ?)",
+			id, true, locale, "all").
 		UpdateColumn("clicks", gorm.Expr("clicks + 1")).Error
 }
 

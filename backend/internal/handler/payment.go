@@ -18,6 +18,7 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/subguard/backend/internal/config"
 	"github.com/subguard/backend/internal/middleware"
@@ -69,9 +70,16 @@ func premiumExpiryFor(plan string) *time.Time {
 }
 
 // parsePaymentPayload extracts (plan, userID) from an invoice payload.
-// New format: "premium_<method>_<plan>_<userID>" (4 parts). The legacy
-// 3-part "premium_<method>_<userID>" is still accepted and treated as a
-// lifetime grant, so invoices created before this deploy still resolve.
+// Format: "premium_<method>_<plan>_<userID>" — exactly 4 parts.
+//
+// A legacy 3-part shape ("premium_<method>_<userID>") used to be
+// accepted and silently coerced to a LIFETIME grant. That defaulted
+// any caller capable of crafting a 3-part payload to the most
+// expensive tier — a small but real downgrade-resistance hole now
+// that the codebase only emits 4-part payloads. Removed under audit
+// Tier-1 #2; any in-flight legacy invoice (Stars invoices expire in
+// hours, CryptoBot in days) is rejected as malformed, with the caller
+// expected to repay through a freshly-issued 4-part invoice.
 func parsePaymentPayload(payload, method string) (plan string, userID uint64, ok bool) {
 	prefix := "premium_" + method + "_"
 	if !strings.HasPrefix(payload, prefix) {
@@ -86,12 +94,6 @@ func parsePaymentPayload(payload, method string) (plan string, userID uint64, ok
 			return "", 0, false
 		}
 		return plan, uid, true
-	case 3: // legacy premium / method / uid → lifetime
-		uid, err := strconv.ParseUint(parts[2], 10, 64)
-		if err != nil {
-			return "", 0, false
-		}
-		return "lifetime", uid, true
 	default:
 		return "", 0, false
 	}
@@ -369,13 +371,21 @@ func (h *PaymentHandler) HandleCryptoWebhook(c fiber.Ctx) error {
 	}
 	log.Printf("✅ [crypto/webhook] Parsed plan=%s UserID=%d", plan, userID)
 
-	// Idempotency: "crypto_<invoice_id>" in the shared charge ID column
+	// Idempotency: "crypto_<invoice_id>" in the shared charge ID column.
+	// The previous flow did a pre-check SELECT for an existing donation
+	// and then a tx with INSERT + UPDATE — a TOCTOU window in which two
+	// concurrent webhooks (Telegram retry + scheduled retry, or two
+	// pods racing on the same payload) both passed the SELECT and then
+	// raced on the UNIQUE constraint inside their tx. The losing tx
+	// rolled back with a 5xx, generating Sentry noise for what is
+	// functionally a no-op.
+	//
+	// Replaced with INSERT ... ON CONFLICT (telegram_payment_charge_id)
+	// DO NOTHING. The dedup is atomic at the row level: the first
+	// concurrent caller inserts and flips premium in the same tx; every
+	// subsequent caller sees RowsAffected == 0, skips the user UPDATE,
+	// and returns 200. Audit Tier-1 #1.
 	chargeID := fmt.Sprintf("crypto_%d", invoice.InvoiceID)
-	var existing model.Donation
-	if err := h.db.Where("telegram_payment_charge_id = ?", chargeID).First(&existing).Error; err == nil {
-		log.Printf("⚠️ [crypto/webhook] Duplicate invoice_id=%d — skipping", invoice.InvoiceID)
-		return c.SendStatus(fiber.StatusOK)
-	}
 
 	var user model.User
 	if err := h.db.First(&user, "id = ?", uint(userID)).Error; err != nil {
@@ -387,32 +397,43 @@ func (h *PaymentHandler) HandleCryptoWebhook(c fiber.Ctx) error {
 
 	amountFloat, _ := strconv.ParseFloat(invoice.Amount, 64)
 	amountCents := int(amountFloat * 100)
-
-	log.Printf("💽 [crypto/webhook] Activating premium for user %d", user.ID)
 	expiresAt := premiumExpiryFor(plan)
+
+	var firstTime bool
 	txErr := h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.User{}).
-			Where("id = ?", user.ID).
-			Updates(map[string]interface{}{
-				"is_donator":         true,
-				"premium_expires_at": expiresAt,
-			}).Error; err != nil {
-			return fmt.Errorf("set premium: %w", err)
-		}
 		donation := model.Donation{
 			UserID:                  user.ID,
 			TelegramID:              user.TelegramID,
 			TelegramPaymentChargeID: chargeID,
 			Amount:                  amountCents,
 		}
-		if err := tx.Create(&donation).Error; err != nil {
-			return fmt.Errorf("create donation: %w", err)
+		result := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "telegram_payment_charge_id"}},
+			DoNothing: true,
+		}).Create(&donation)
+		if result.Error != nil {
+			return fmt.Errorf("create donation: %w", result.Error)
 		}
-		return nil
+		if result.RowsAffected == 0 {
+			// Already processed in an earlier (concurrent or retry) tx,
+			// which already flipped is_donator. Nothing to do.
+			return nil
+		}
+		firstTime = true
+		return tx.Model(&model.User{}).
+			Where("id = ?", user.ID).
+			Updates(map[string]interface{}{
+				"is_donator":         true,
+				"premium_expires_at": expiresAt,
+			}).Error
 	})
 	if txErr != nil {
 		log.Printf("❌ [crypto/webhook] tx error for user=%d: %v", user.ID, txErr)
 		return c.Status(fiber.StatusInternalServerError).SendString("tx error")
+	}
+	if !firstTime {
+		log.Printf("⚠️ [crypto/webhook] Duplicate chargeID=%s for user=%d — skipping", chargeID, user.ID)
+		return c.SendStatus(fiber.StatusOK)
 	}
 	log.Printf("🟢 [crypto/webhook] Premium activated for user=%d, invoice=%d", user.ID, invoice.InvoiceID)
 

@@ -41,21 +41,28 @@ func (r *SubscriptionRepo) Create(sub *model.Subscription) error {
 // reminder fires on the new date. Without this, editing a sub from
 // "tomorrow" to "next month" would block the reminder for ~20h after
 // the new date arrives.
+//
+// Single UPDATE (one round-trip + atomic). The previous implementation
+// did two sequential UPDATEs — field set, then `notified_at = NULL` —
+// outside a transaction; the notification worker could read the
+// already-updated row mid-pair, see a stale `notified_at` against the
+// new `next_payment_at`, and either fire a duplicate reminder or
+// suppress one entirely depending on the interleave. Now both writes
+// land in the same statement so the worker sees a consistent row.
+// Audit Tier-1 #3.
 func (r *SubscriptionRepo) Update(sub *model.Subscription, clearNotified bool) error {
-	tx := r.db.Model(sub).Select(
+	cols := []string{
 		"Name", "Brand", "Tag", "Note", "IconName", "IconColor",
 		"Amount", "Currency", "Period", "NextPaymentAt",
 		"IsTrial", "IsAutoPay",
-	)
-	if err := tx.Updates(sub).Error; err != nil {
-		return err
 	}
 	if clearNotified {
-		return r.db.Model(&model.Subscription{}).
-			Where("id = ?", sub.ID).
-			Update("notified_at", nil).Error
+		// Setting the pointer to nil before .Updates(struct) makes
+		// GORM emit `notified_at = NULL` inline with the other fields.
+		sub.NotifiedAt = nil
+		cols = append(cols, "NotifiedAt")
 	}
-	return nil
+	return r.db.Model(sub).Select(cols).Updates(sub).Error
 }
 
 func (r *SubscriptionRepo) Delete(id uuid.UUID, userID uint) error {
