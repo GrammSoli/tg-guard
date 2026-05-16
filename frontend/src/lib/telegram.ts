@@ -192,7 +192,16 @@ export function getTelegramUser(): TelegramUser | null {
  *   "pending"   — payment is still processing
  *
  * Falls back to rejecting with an Error when running outside Telegram.
+ *
+ * Timeout: if Telegram never invokes the callback (lib bug, WebView
+ * killed mid-payment, ancient client) the Promise rejects after 5
+ * minutes so callers don't have their `loading` UI state stuck on
+ * forever. 5 minutes is well over the typical payment-sheet
+ * completion time including card entry, so legitimate slow users
+ * still resolve normally. Audit Tier-4 #3.
  */
+const openInvoiceTimeoutMs = 5 * 60 * 1000;
+
 export function openInvoice(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     try {
@@ -208,7 +217,16 @@ export function openInvoice(url: string): Promise<string> {
         reject(new Error("openInvoice not available"));
         return;
       }
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error("openInvoice timeout — Telegram did not return a status"));
+      }, openInvoiceTimeoutMs);
       openInvoiceFn(url, (status: string) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
         resolve(status);
       });
     } catch (err) {

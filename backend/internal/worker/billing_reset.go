@@ -55,6 +55,19 @@ func (w *BillingResetWorker) Start(ctx context.Context) {
 // on the WHERE has_paid=true clause finding nothing on the second pass:
 // that protection broke as soon as any member re-paid between the two
 // ticks.
+//
+// Timezone semantics (audit Tier-4 #5): billing_day is interpreted in
+// UTC, NOT in the user's stored timezone. Net effect: a room created
+// by a Sydney user (UTC+10/+11) with billing_day=15 resets at
+// 14 Sept 14:00 Sydney time = 15 Sept 00:00 UTC, not 15 Sept Sydney
+// midnight. This is intentional for now — per-room TZ would require
+// a `timezone` column on shared_rooms, a separate reset cursor per
+// timezone slice, and a UI for the owner to pick. For the current
+// audience (primarily RU/EN single-timezone groups), accepting the
+// "all rooms reset at one global moment" model is simpler and the
+// off-by-up-to-12h shift in the owner's local view of "billing day"
+// is small relative to a monthly cycle. Re-evaluate when shared-
+// rooms grows international.
 func (w *BillingResetWorker) check(ctx context.Context) {
 	now := time.Now().UTC()
 	today := now.Day()

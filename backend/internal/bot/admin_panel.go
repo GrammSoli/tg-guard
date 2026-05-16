@@ -78,19 +78,35 @@ func newAdminPanel(cfg *config.Config, db *gorm.DB, rdb *redis.Client, appCtx co
 }
 
 // ── FSM helpers ────────────────────────────────────────
+//
+// All FSM mutators below pipeline their Redis ops so a state+data
+// pair lands as a single round-trip and concurrent admin clicks
+// (e.g. user double-taps a button before the first command's reply
+// renders) can't interleave a "set state for flow A" with a "set
+// data for flow B" across the network. The Pipeline DOES NOT give
+// us atomicity in the MULTI/EXEC sense — another client could read
+// between the two writes — but the only reader is THIS admin's own
+// follow-up message, which is serialized at the Telegram bot
+// dispatch layer (one update at a time per chat). The pipelining
+// just collapses the network cost. Audit Tier-4 #4.
 
 func (p *adminPanel) setState(ctx context.Context, tgID int64, state string) {
 	idStr := strconv.FormatInt(tgID, 10)
-	key := fsmKeyPrefix + idStr
+	stateKey := fsmKeyPrefix + idStr
+	dataKey := fsmDataPrefix + idStr
 	if state == stateNone {
-		p.rdb.Del(ctx, key)
+		p.rdb.Del(ctx, stateKey)
 		return
 	}
-	p.rdb.Set(ctx, key, state, fsmTTL)
+	pipe := p.rdb.Pipeline()
+	pipe.Set(ctx, stateKey, state, fsmTTL)
 	// Mirror the TTL onto the data key so a multi-step flow that only
 	// writes data between state transitions doesn't let the state expire
 	// underneath it.
-	p.rdb.Expire(ctx, fsmDataPrefix+idStr, fsmTTL)
+	pipe.Expire(ctx, dataKey, fsmTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Printf("[admin-fsm] setState pipeline tg=%d: %v", tgID, err)
+	}
 }
 
 func (p *adminPanel) getState(ctx context.Context, tgID int64) string {
@@ -108,8 +124,12 @@ func (p *adminPanel) getState(ctx context.Context, tgID int64) string {
 // setData call only touched the data key — see audit A1.
 func (p *adminPanel) setData(ctx context.Context, tgID int64, data string) {
 	idStr := strconv.FormatInt(tgID, 10)
-	p.rdb.Set(ctx, fsmDataPrefix+idStr, data, fsmTTL)
-	p.rdb.Expire(ctx, fsmKeyPrefix+idStr, fsmTTL)
+	pipe := p.rdb.Pipeline()
+	pipe.Set(ctx, fsmDataPrefix+idStr, data, fsmTTL)
+	pipe.Expire(ctx, fsmKeyPrefix+idStr, fsmTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Printf("[admin-fsm] setData pipeline tg=%d: %v", tgID, err)
+	}
 }
 
 func (p *adminPanel) getData(ctx context.Context, tgID int64) string {
@@ -124,8 +144,12 @@ func (p *adminPanel) getData(ctx context.Context, tgID int64) string {
 // use setState(stateNone) which preserves data.
 func (p *adminPanel) clearState(ctx context.Context, tgID int64) {
 	idStr := strconv.FormatInt(tgID, 10)
-	p.rdb.Del(ctx, fsmKeyPrefix+idStr)
-	p.rdb.Del(ctx, fsmDataPrefix+idStr)
+	pipe := p.rdb.Pipeline()
+	pipe.Del(ctx, fsmKeyPrefix+idStr)
+	pipe.Del(ctx, fsmDataPrefix+idStr)
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Printf("[admin-fsm] clearState pipeline tg=%d: %v", tgID, err)
+	}
 }
 
 // ── /admin — Main Menu ─────────────────────────────────
@@ -565,6 +589,22 @@ func (p *adminPanel) handleStats(ctx context.Context, b *tgbot.Bot, chatID int64
 // overhead. Bump if export latency matters more than memory headroom.
 const exportBatchSize = 1000
 
+// exportCSVLockKey is the per-admin Redis single-flight gate for CSV
+// export. The export is a 10-minute job that streams the whole users
+// table; two clicks (admin double-tapped the button, or Telegram retried
+// the callback) used to spawn two parallel iterations both feeding the
+// SAME Telegram document upload — wasted DB read + risk of two
+// big-file uploads racing on the receiving end. Audit Tier-4 #1.
+//
+// The key is per-admin (not global) because two different admins
+// legitimately running their own exports in parallel should both
+// succeed. TTL covers the export's 10-minute ctx deadline.
+const exportCSVLockTTL = 11 * time.Minute
+
+func exportCSVLockKey(adminChatID int64) string {
+	return fmt.Sprintf("admin_export_csv_lock:%d", adminChatID)
+}
+
 // handleExportCSV dispatches the heavy export to a background goroutine
 // and returns immediately. The Telegram callback was already acked with
 // a "⏳ Формирую файл..." toast by the router, so the admin sees feedback
@@ -574,13 +614,44 @@ const exportBatchSize = 1000
 // The goroutine is registered on workerWG so graceful shutdown waits for
 // in-flight exports to finish (or hit the drain timeout) before closing
 // the DB pool.
-func (p *adminPanel) handleExportCSV(_ context.Context, b *tgbot.Bot, chatID int64, _ int) {
+//
+// Single-flight per admin: Redis SetNX gate ensures a double-click
+// surfaces a "уже идёт" message instead of spawning a parallel export
+// (audit Tier-4 #1). Lock TTL covers the runExportCSV 10-min ctx;
+// defer-Del releases earlier on normal completion.
+func (p *adminPanel) handleExportCSV(ctx context.Context, b *tgbot.Bot, chatID int64, _ int) {
+	lockKey := exportCSVLockKey(chatID)
+	lockAcquired := false
+	if p.rdb != nil {
+		acquired, err := p.rdb.SetNX(ctx, lockKey, "1", exportCSVLockTTL).Result()
+		if err != nil {
+			log.Printf("[admin-export-csv] redis SetNX error: %v — proceeding without lock", err)
+		} else if !acquired {
+			b.SendMessage(ctx, &tgbot.SendMessageParams{
+				ChatID: chatID,
+				Text:   "⚠️ Экспорт уже идёт — дождитесь файла.",
+			})
+			return
+		} else {
+			lockAcquired = true
+		}
+	}
+
 	if p.wg != nil {
 		p.wg.Add(1)
 	}
 	go func() {
 		if p.wg != nil {
 			defer p.wg.Done()
+		}
+		if lockAcquired {
+			defer func() {
+				releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := p.rdb.Del(releaseCtx, lockKey).Err(); err != nil {
+					log.Printf("[admin-export-csv] lock release error: %v (TTL will reclaim)", err)
+				}
+			}()
 		}
 		workerutil.Supervise("admin-export-csv", func() {
 			p.runExportCSV(b, chatID)

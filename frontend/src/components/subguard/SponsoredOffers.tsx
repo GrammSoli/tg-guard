@@ -21,9 +21,24 @@ export function SponsoredOffers() {
   const viewedRef = useRef(false);
 
   useEffect(() => {
-    api<SponsoredOffer[]>("/recommendations")
-      .then(setOffers)
-      .catch(() => setOffers([]));
+    // `cancelled` flag plus AbortController guards against a stale
+    // setState call if SponsoredOffers unmounts before the fetch
+    // resolves (user switches tab, navigates away). Without it React
+    // logs a "setState on unmounted component" warning in dev and
+    // schedules a useless update in prod. Audit Tier-4 #2.
+    let cancelled = false;
+    const ac = new AbortController();
+    api<SponsoredOffer[]>("/recommendations", { signal: ac.signal })
+      .then((data) => {
+        if (!cancelled) setOffers(data);
+      })
+      .catch(() => {
+        if (!cancelled) setOffers([]);
+      });
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
   }, []);
 
   // Track impressions when section scrolls into view (once per session).
@@ -53,6 +68,16 @@ export function SponsoredOffers() {
   }, [offers]);
 
   const trackClick = (id: number) => {
+    // Fire-and-forget — the click reaches the network before the
+    // browser navigates (target="_blank" keeps this WebView on the
+    // current URL while opening a new tab, so the in-flight fetch
+    // is not aborted by navigation in practice).
+    //
+    // We considered navigator.sendBeacon here as a more robust
+    // delivery channel for the "tab is about to navigate away" case,
+    // but sendBeacon can't carry the X-Telegram-Init-Data header that
+    // AuthMiddleware reads — moving auth to a query param for one
+    // endpoint is a separate audit item. Audit Tier-4 #2 follow-up.
     api(`/recommendations/${id}/track/click`, { method: "POST", body: {} }).catch(
       () => {},
     );
