@@ -44,6 +44,15 @@ type StatsResult struct {
 	// Monetization
 	Donators    int64 `json:"donators"`
 	DonorsToday int64 `json:"donors_today"`
+	// Premium split by plan, derived from premium_expires_at: a lifetime
+	// grant has NULL expiry, a monthly grant has a date.
+	DonatorsMonthly  int64 `json:"donators_monthly"`
+	DonatorsLifetime int64 `json:"donators_lifetime"`
+	// Revenue, all-time. Stars and Crypto are reported separately because
+	// donations.amount stores XTR for Stars and USD cents for Crypto —
+	// there is no common unit without an exchange rate.
+	RevenueStars       int64 `json:"revenue_stars"`
+	RevenueCryptoCents int64 `json:"revenue_crypto_cents"`
 
 	// Content
 	TotalSubscriptions int64 `json:"total_subscriptions"`
@@ -84,6 +93,8 @@ func (r *AdminRepo) GetStats() (*StatsResult, error) {
 			-- Monetization
 			COUNT(*) FILTER (WHERE u.is_donator)                              AS donators,
 			COUNT(*) FILTER (WHERE u.is_donator AND u.updated_at >= $1)       AS donors_today,
+			COUNT(*) FILTER (WHERE u.is_donator AND u.premium_expires_at IS NOT NULL) AS donators_monthly,
+			COUNT(*) FILTER (WHERE u.is_donator AND u.premium_expires_at IS NULL)     AS donators_lifetime,
 
 			-- Activity. Inactive users must be excluded — blocking the bot
 			-- fires my_chat_member which bumps users.updated_at, so without
@@ -124,6 +135,24 @@ func (r *AdminRepo) GetStats() (*StatsResult, error) {
 	stats.SubsToday = content.SubsToday
 	stats.TotalRooms = content.TotalRooms
 
+	// Revenue, all-time. Crypto rows carry a `crypto_<invoice>` charge id;
+	// Stars rows carry Telegram's native (long) charge id — split on that.
+	type revenueRow struct {
+		RevenueStars       int64
+		RevenueCryptoCents int64
+	}
+	var rev revenueRow
+	if err := r.db.Raw(`
+		SELECT
+			COALESCE(SUM(amount) FILTER (WHERE telegram_payment_charge_id NOT LIKE 'crypto\_%'), 0) AS revenue_stars,
+			COALESCE(SUM(amount) FILTER (WHERE telegram_payment_charge_id LIKE 'crypto\_%'), 0)      AS revenue_crypto_cents
+		FROM donations
+	`).Scan(&rev).Error; err != nil {
+		return nil, fmt.Errorf("revenue stats: %w", err)
+	}
+	stats.RevenueStars = rev.RevenueStars
+	stats.RevenueCryptoCents = rev.RevenueCryptoCents
+
 	// Today's signups by traffic source (top 5). Failure here is logged
 	// but NOT fatal — `TodaySources` is a nice-to-have breakdown under
 	// the main "users today" number; we'd rather show the rest of the
@@ -156,15 +185,60 @@ type PopularServiceStat struct {
 	Count int64  `json:"count"`
 }
 
-func (r *AdminRepo) GetPopularServices(limit int) ([]PopularServiceStat, error) {
+// GetPopularServices returns the most-added services among subscriptions
+// created on or after `since`.
+func (r *AdminRepo) GetPopularServices(limit int, since time.Time) ([]PopularServiceStat, error) {
 	var results []PopularServiceStat
 	err := r.db.Model(&model.Subscription{}).
 		Select("brand, name, COUNT(*) as count").
+		Where("created_at >= ?", since).
 		Group("brand, name").
 		Order("count DESC").
 		Limit(limit).
 		Scan(&results).Error
 	return results, err
+}
+
+// PeriodStats holds the dashboard metrics that move with the selected
+// window (today / 7d / 30d). `since` is the inclusive lower bound.
+type PeriodStats struct {
+	NewUsers           int64
+	NewPurchases       int64 // donation rows created in the period
+	NewSubs            int64
+	RevenueStars       int64
+	RevenueCryptoCents int64
+	Sources            []TrafficSourceStat `gorm:"-"`
+}
+
+// GetPeriodStats computes the period-scoped slice of the admin dashboard.
+func (r *AdminRepo) GetPeriodStats(since time.Time) (*PeriodStats, error) {
+	var ps PeriodStats
+	if err := r.db.Raw(`
+		SELECT
+			(SELECT COUNT(*) FROM users WHERE created_at >= $1 AND deleted_at IS NULL) AS new_users,
+			(SELECT COUNT(*) FROM subscriptions WHERE created_at >= $1)                AS new_subs,
+			(SELECT COUNT(*) FROM donations WHERE created_at >= $1)                    AS new_purchases,
+			(SELECT COALESCE(SUM(amount) FILTER (WHERE telegram_payment_charge_id NOT LIKE 'crypto\_%'), 0)
+				FROM donations WHERE created_at >= $1)                                AS revenue_stars,
+			(SELECT COALESCE(SUM(amount) FILTER (WHERE telegram_payment_charge_id LIKE 'crypto\_%'), 0)
+				FROM donations WHERE created_at >= $1)                                AS revenue_crypto_cents
+	`, since).Scan(&ps).Error; err != nil {
+		return nil, fmt.Errorf("period stats: %w", err)
+	}
+
+	// Signups-by-source for the period — secondary, non-fatal.
+	var sources []TrafficSourceStat
+	if err := r.db.Raw(`
+		SELECT COALESCE(NULLIF(traffic_source_id, ''), 'organic') AS source, COUNT(*) AS count
+		FROM users
+		WHERE created_at >= $1 AND deleted_at IS NULL
+		GROUP BY source ORDER BY count DESC LIMIT 5
+	`, since).Scan(&sources).Error; err != nil {
+		log.Printf("[admin.GetPeriodStats] sources query failed: %v", err)
+	} else {
+		ps.Sources = sources
+	}
+	return &ps, nil
 }
 
 // ── Catalog CRUD ───────────────────────────────────────

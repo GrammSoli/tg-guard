@@ -272,8 +272,8 @@ func (p *adminPanel) handleCallback(ctx context.Context, b *tgbot.Bot, update *m
 		p.clearState(ctx, cb.From.ID)
 		p.sendMainMenu(ctx, b, chatID, msgID)
 
-	case data == "admin_stats":
-		p.handleStats(ctx, b, chatID, msgID)
+	case data == "admin_stats" || strings.HasPrefix(data, "admin_stats:"):
+		p.handleStatsSection(ctx, b, chatID, msgID, data)
 
 	case data == "admin_users":
 		p.handleUsersPrompt(ctx, b, cb.From.ID, chatID, msgID)
@@ -477,108 +477,214 @@ func (p *adminPanel) handleText(ctx context.Context, b *tgbot.Bot, update *model
 
 // ── Stats Module ───────────────────────────────────────
 
-func (p *adminPanel) handleStats(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int) {
-	stats, err := p.repo.GetStats()
-	if err != nil {
-		log.Printf("[admin] stats error: %v", err)
-		return
+// ── Stats dashboard ─────────────────────────────────────
+//
+// The dashboard is four section screens (Audience / Money / Activity /
+// Services), each navigable via inline buttons and scoped by a
+// today / 7d / 30d period toggle. All state lives in the callback data
+// — `admin_stats:<section>:<period>` — so no FSM storage is needed.
+
+type statsPeriod struct {
+	code  string
+	label string
+	since func(now time.Time) time.Time
+}
+
+var statsPeriods = []statsPeriod{
+	{"1d", "Сегодня", func(now time.Time) time.Time {
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	}},
+	{"7d", "7 дней", func(now time.Time) time.Time { return now.AddDate(0, 0, -7) }},
+	{"30d", "30 дней", func(now time.Time) time.Time { return now.AddDate(0, 0, -30) }},
+}
+
+const (
+	defaultStatsSection = "aud"
+	defaultStatsPeriod  = "7d"
+)
+
+func statsPeriodByCode(code string) statsPeriod {
+	for _, pr := range statsPeriods {
+		if pr.code == code {
+			return pr
+		}
+	}
+	return statsPeriods[1] // 7d
+}
+
+// parseStatsCallback splits `admin_stats[:section[:period]]` into its
+// parts, defaulting to the audience section and the 7-day window.
+func parseStatsCallback(data string) (section, period string) {
+	section, period = defaultStatsSection, defaultStatsPeriod
+	parts := strings.Split(data, ":")
+	if len(parts) > 1 && parts[1] != "" {
+		section = parts[1]
+	}
+	if len(parts) > 2 && parts[2] != "" {
+		period = parts[2]
+	}
+	return section, period
+}
+
+func (p *adminPanel) handleStatsSection(ctx context.Context, b *tgbot.Bot, chatID int64, msgID int, data string) {
+	section, periodCode := parseStatsCallback(data)
+	period := statsPeriodByCode(periodCode)
+	since := period.since(time.Now().UTC())
+
+	var text string
+	if section == "svc" {
+		popular, err := p.repo.GetPopularServices(10, since)
+		if err != nil {
+			log.Printf("[admin] popular services error: %v", err)
+			return
+		}
+		text = renderStatsServices(popular, period)
+	} else {
+		stats, err := p.repo.GetStats()
+		if err != nil {
+			log.Printf("[admin] stats error: %v", err)
+			return
+		}
+		ps, err := p.repo.GetPeriodStats(since)
+		if err != nil {
+			log.Printf("[admin] period stats error: %v", err)
+			return
+		}
+		switch section {
+		case "mon":
+			text = renderStatsMoney(stats, ps, period)
+		case "act":
+			text = renderStatsActivity(stats, ps, period)
+		default:
+			section = "aud"
+			text = renderStatsAudience(stats, ps, period)
+		}
 	}
 
-	// Locale percentages
-	ruPct, enPct, otherPct := 0, 0, 0
-	if stats.TotalUsers > 0 {
-		ruPct = int(stats.LocaleRU * 100 / stats.TotalUsers)
-		enPct = int(stats.LocaleEN * 100 / stats.TotalUsers)
-		otherPct = 100 - ruPct - enPct
-	}
+	kb := statsKeyboard(section, period.code)
+	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   msgID,
+		Text:        text,
+		ParseMode:   "Markdown",
+		ReplyMarkup: &kb,
+	})
+}
 
+func renderStatsAudience(s *repository.StatsResult, ps *repository.PeriodStats, period statsPeriod) string {
+	churn, ru, en, other := 0, 0, 0, 0
+	if s.TotalUsers > 0 {
+		churn = int(s.ChurnedUsers * 100 / s.TotalUsers)
+		ru = int(s.LocaleRU * 100 / s.TotalUsers)
+		en = int(s.LocaleEN * 100 / s.TotalUsers)
+		other = 100 - ru - en
+	}
 	var sb strings.Builder
-	sb.WriteString("📊 *Аналитика SubGuard*\n\n")
-
-	// ── Audience ──
-	// Churn rate as a percentage of total. Guarded against div-by-zero
-	// for a brand-new DB (TotalUsers == 0).
-	churnRate := 0
-	if stats.TotalUsers > 0 {
-		churnRate = int(stats.ChurnedUsers * 100 / stats.TotalUsers)
-	}
-	sb.WriteString("👥 *Аудитория*\n")
-	sb.WriteString(fmt.Sprintf("• Всего заходило: *%d*\n", stats.TotalUsers))
-	sb.WriteString(fmt.Sprintf("• 🟢 Живых (Active): *%d*\n", stats.ActiveUsers))
-	sb.WriteString(fmt.Sprintf("• 🔴 Отписок (Churn): *%d* (%d%%)\n", stats.ChurnedUsers, churnRate))
-	sb.WriteString(fmt.Sprintf("• Сегодня: *+%d*\n", stats.UsersToday))
-
-	// Traffic source attribution for today
-	if stats.UsersToday > 0 && len(stats.TodaySources) > 0 {
-		for _, src := range stats.TodaySources {
-			icon := "🔗"
-			name := "`" + src.Source + "`"
-			if src.Source == "organic" {
-				icon = "🌿"
-				name = "Органика"
-			}
-			sb.WriteString(fmt.Sprintf("   ↳ %s %s: %d\n", icon, name, src.Count))
+	sb.WriteString("👥 *Аудитория* · " + period.label + "\n\n")
+	sb.WriteString(fmt.Sprintf("• Всего заходило: *%d*\n", s.TotalUsers))
+	sb.WriteString(fmt.Sprintf("• 🟢 Живых: *%d*\n", s.ActiveUsers))
+	sb.WriteString(fmt.Sprintf("• 🔴 Отписок: *%d* (%d%%)\n", s.ChurnedUsers, churn))
+	sb.WriteString(fmt.Sprintf("• Новых за период: *+%d*\n", ps.NewUsers))
+	for _, src := range ps.Sources {
+		icon, name := "🔗", "`"+src.Source+"`"
+		if src.Source == "organic" {
+			icon, name = "🌿", "Органика"
 		}
+		sb.WriteString(fmt.Sprintf("   ↳ %s %s: %d\n", icon, name, src.Count))
 	}
-
-	sb.WriteString(fmt.Sprintf("• Вчера: *+%d*\n", stats.UsersYesterday))
-	sb.WriteString(fmt.Sprintf("• За 7 дней: *+%d*\n", stats.UsersWeek))
-	sb.WriteString(fmt.Sprintf("• DAU: %d | MAU: %d\n\n", stats.DAU, stats.MAU))
-
-	// ── Demographics ──
+	sb.WriteString(fmt.Sprintf("• DAU: %d | MAU: %d\n\n", s.DAU, s.MAU))
 	sb.WriteString("🌍 *Демография*\n")
-	sb.WriteString(fmt.Sprintf("• 🇷🇺 RU: %d (%d%%)\n", stats.LocaleRU, ruPct))
-	sb.WriteString(fmt.Sprintf("• 🇬🇧 EN: %d (%d%%)\n", stats.LocaleEN, enPct))
-	if stats.LocaleOther > 0 {
-		sb.WriteString(fmt.Sprintf("• 🌐 Other: %d (%d%%)\n", stats.LocaleOther, otherPct))
+	sb.WriteString(fmt.Sprintf("• 🇷🇺 RU: %d (%d%%)\n", s.LocaleRU, ru))
+	sb.WriteString(fmt.Sprintf("• 🇬🇧 EN: %d (%d%%)\n", s.LocaleEN, en))
+	if s.LocaleOther > 0 {
+		sb.WriteString(fmt.Sprintf("• 🌐 Other: %d (%d%%)\n", s.LocaleOther, other))
 	}
-	sb.WriteString("\n")
+	return sb.String()
+}
 
-	// ── Monetization ──
-	sb.WriteString("💎 *Монетизация*\n")
-	sb.WriteString(fmt.Sprintf("• Всего Premium: *%d*\n", stats.Donators))
-	sb.WriteString(fmt.Sprintf("• Premium сегодня: *+%d*\n\n", stats.DonorsToday))
+func renderStatsMoney(s *repository.StatsResult, ps *repository.PeriodStats, period statsPeriod) string {
+	var sb strings.Builder
+	sb.WriteString("💎 *Монетизация* · " + period.label + "\n\n")
+	sb.WriteString(fmt.Sprintf("• Всего Premium: *%d*\n", s.Donators))
+	sb.WriteString(fmt.Sprintf("   ↳ 🔁 Месячных: %d\n", s.DonatorsMonthly))
+	sb.WriteString(fmt.Sprintf("   ↳ ♾ Пожизненных: %d\n", s.DonatorsLifetime))
+	sb.WriteString(fmt.Sprintf("• Покупок за период: *+%d*\n\n", ps.NewPurchases))
+	sb.WriteString("💰 *Выручка*\n")
+	sb.WriteString(fmt.Sprintf("• Всего: ⭐ %d · 💵 %s\n", s.RevenueStars, formatCents(s.RevenueCryptoCents)))
+	sb.WriteString(fmt.Sprintf("• За период: ⭐ %d · 💵 %s\n", ps.RevenueStars, formatCents(ps.RevenueCryptoCents)))
+	return sb.String()
+}
 
-	// ── Content ──
-	sb.WriteString("📋 *Активность*\n")
-	sb.WriteString(fmt.Sprintf("• Всего подписок: %d\n", stats.TotalSubscriptions))
-	sb.WriteString(fmt.Sprintf("• Добавлено сегодня: +%d\n", stats.SubsToday))
-	sb.WriteString(fmt.Sprintf("• Активных комнат: %d", stats.TotalRooms))
+func renderStatsActivity(s *repository.StatsResult, ps *repository.PeriodStats, period statsPeriod) string {
+	var sb strings.Builder
+	sb.WriteString("📋 *Активность* · " + period.label + "\n\n")
+	sb.WriteString(fmt.Sprintf("• Всего подписок: *%d*\n", s.TotalSubscriptions))
+	sb.WriteString(fmt.Sprintf("• Добавлено за период: *+%d*\n", ps.NewSubs))
+	sb.WriteString(fmt.Sprintf("• Активных комнат: *%d*\n", s.TotalRooms))
+	return sb.String()
+}
 
-	// ── Popular Services ──
-	popular, popErr := p.repo.GetPopularServices(10)
-	if popErr != nil {
-		log.Printf("[admin] popular services error: %v", popErr)
+func renderStatsServices(popular []repository.PopularServiceStat, period statsPeriod) string {
+	var sb strings.Builder
+	sb.WriteString("📈 *Популярные сервисы* · " + period.label + "\n\n")
+	if len(popular) == 0 {
+		sb.WriteString("_Нет данных за выбранный период._")
+		return sb.String()
 	}
-	if len(popular) > 0 {
-		sb.WriteString("\n\n📈 *Популярные сервисы*\n")
-		for i, s := range popular {
-			medal := fmt.Sprintf("%d.", i+1)
-			switch i {
-			case 0:
-				medal = "🥇"
-			case 1:
-				medal = "🥈"
-			case 2:
-				medal = "🥉"
-			}
-			sb.WriteString(fmt.Sprintf("%s `%s` — %d\n", medal, escapeMarkdownLite(s.Name), s.Count))
+	for i, s := range popular {
+		medal := fmt.Sprintf("%d.", i+1)
+		switch i {
+		case 0:
+			medal = "🥇"
+		case 1:
+			medal = "🥈"
+		case 2:
+			medal = "🥉"
+		}
+		sb.WriteString(fmt.Sprintf("%s `%s` — %d\n", medal, escapeMarkdownLite(s.Name), s.Count))
+	}
+	return sb.String()
+}
+
+// formatCents renders USD cents as a dollar amount, e.g. 4500 → "$45.00".
+func formatCents(cents int64) string {
+	return fmt.Sprintf("$%d.%02d", cents/100, cents%100)
+}
+
+// statsKeyboard builds the period toggle + section navigation for a stats
+// screen. The active period and section are prefixed with a dot.
+func statsKeyboard(section, periodCode string) models.InlineKeyboardMarkup {
+	periodRow := make([]models.InlineKeyboardButton, 0, len(statsPeriods))
+	for _, pr := range statsPeriods {
+		label := pr.label
+		if pr.code == periodCode {
+			label = "• " + label
+		}
+		periodRow = append(periodRow, models.InlineKeyboardButton{
+			Text:         label,
+			CallbackData: "admin_stats:" + section + ":" + pr.code,
+		})
+	}
+
+	navBtn := func(code, label string) models.InlineKeyboardButton {
+		if code == section {
+			label = "• " + label
+		}
+		return models.InlineKeyboardButton{
+			Text:         label,
+			CallbackData: "admin_stats:" + code + ":" + periodCode,
 		}
 	}
 
-	kb := models.InlineKeyboardMarkup{
+	return models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{
+			periodRow,
+			{navBtn("aud", "👥 Аудитория"), navBtn("mon", "💎 Монетизация")},
+			{navBtn("act", "📋 Активность"), navBtn("svc", "📈 Сервисы")},
 			{{Text: "📥 Экспорт в CSV", CallbackData: "admin_export_csv"}},
 			{{Text: "🔙 Назад", CallbackData: "admin_back"}},
 		},
 	}
-	b.EditMessageText(ctx, &tgbot.EditMessageTextParams{
-		ChatID:      chatID,
-		MessageID:   msgID,
-		Text:        sb.String(),
-		ParseMode:   "Markdown",
-		ReplyMarkup: &kb,
-	})
 }
 
 // ── CSV Export ──────────────────────────────────────────

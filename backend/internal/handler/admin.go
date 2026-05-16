@@ -117,7 +117,8 @@ func (h *AdminHandler) GetStats(c fiber.Ctx) error {
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "stats failed"})
 	}
-	popular, _ := h.repo.GetPopularServices(10)
+	// Zero time as the lower bound = all-time popularity for this API.
+	popular, _ := h.repo.GetPopularServices(10, time.Time{})
 	return c.JSON(fiber.Map{
 		"stats":            stats,
 		"popular_services": popular,
