@@ -127,6 +127,33 @@ func (h *SubscriptionHandler) Create(c fiber.Ctx) error {
 	if body.Name == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "name is required"})
 	}
+	// App-level length caps mirror Subscription's gorm:"size:N" tags.
+	// Without these the DB silently truncates, so a 50-byte "RUBLE"
+	// currency would land as "RUB" and bill members in the wrong unit.
+	if err := maxLen(c, "name", body.Name, 100); err != nil {
+		return err
+	}
+	if err := maxLen(c, "brand", body.Brand, 32); err != nil {
+		return err
+	}
+	if err := maxLen(c, "tag", body.Tag, 64); err != nil {
+		return err
+	}
+	if err := maxLen(c, "note", body.Note, 128); err != nil {
+		return err
+	}
+	if err := maxLen(c, "icon_name", body.IconName, 32); err != nil {
+		return err
+	}
+	if err := maxLen(c, "icon_color", body.IconColor, 16); err != nil {
+		return err
+	}
+	if err := maxLen(c, "currency", body.Currency, 3); err != nil {
+		return err
+	}
+	if err := maxLen(c, "period", body.Period, 10); err != nil {
+		return err
+	}
 
 	nextPayment, err := parseUserDate(body.NextPaymentAt, user.Timezone)
 	if err != nil {
@@ -241,6 +268,26 @@ func (h *SubscriptionHandler) Update(c fiber.Ctx) error {
 	}
 	if err := c.Bind().JSON(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
+	}
+	// Mirror Create's length caps: PATCH would otherwise let an oversized
+	// value land at the DB layer and get silently truncated.
+	for _, v := range []struct {
+		field string
+		val   *string
+		max   int
+	}{
+		{"name", body.Name, 100},
+		{"brand", body.Brand, 32},
+		{"tag", body.Tag, 64},
+		{"note", body.Note, 128},
+		{"icon_name", body.IconName, 32},
+		{"icon_color", body.IconColor, 16},
+		{"currency", body.Currency, 3},
+		{"period", body.Period, 10},
+	} {
+		if err := maxLenPtr(c, v.field, v.val, v.max); err != nil {
+			return err
+		}
 	}
 
 	clearNotified := false

@@ -133,12 +133,15 @@ func (h *UserHandler) UpdateMe(c fiber.Ctx) error {
 	}
 
 	updates := map[string]interface{}{}
+	if err := maxLenPtr(c, "locale", body.Locale, 5); err != nil {
+		return err
+	}
 	if body.Locale != nil {
 		updates["locale"] = *body.Locale
 	}
 	if body.Timezone != nil {
-		if len(*body.Timezone) > 64 {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "timezone too long"})
+		if err := maxLen(c, "timezone", *body.Timezone, 64); err != nil {
+			return err
 		}
 		// Validate the IANA tz name so we never persist garbage that the
 		// worker will silently fall back to UTC on. Side-effect caches the
@@ -147,6 +150,9 @@ func (h *UserHandler) UpdateMe(c fiber.Ctx) error {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid timezone"})
 		}
 		updates["timezone"] = *body.Timezone
+	}
+	if err := maxLenPtr(c, "base_currency", body.BaseCurrency, 3); err != nil {
+		return err
 	}
 	if body.BaseCurrency != nil {
 		updates["base_currency"] = *body.BaseCurrency
