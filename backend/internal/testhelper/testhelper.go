@@ -122,6 +122,18 @@ func TruncateAll(t *testing.T, db *gorm.DB) {
 	}
 }
 
+// SignCryptoPayload returns the hex-encoded signature Crypto Pay's
+// webhook sends in the `crypto-pay-api-signature` header for the given
+// raw body. Algorithm: HMAC-SHA256(SHA256(token), body). Mirrors the
+// production verification path in handler.HandleCryptoWebhook — kept
+// in lockstep so a scheme change shows up as a test failure.
+func SignCryptoPayload(token string, body []byte) string {
+	tokenHash := sha256.Sum256([]byte(token))
+	mac := hmac.New(sha256.New, tokenHash[:])
+	mac.Write(body)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 // SignInitData builds a Telegram WebApp initData string signed with
 // botToken. The fields map is merged into the payload as-is (typically
 // "user" + "auth_date" + optional "chat_instance", "chat_type", etc.).
