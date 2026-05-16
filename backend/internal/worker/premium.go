@@ -69,6 +69,7 @@ const premiumBatchSize = 500
 // up. Now peak memory is bounded by the batch size regardless of how
 // far behind we are.
 func (w *PremiumWorker) check(ctx context.Context) {
+	defer observability.TimeWorkerTick("premium")()
 	now := time.Now().UTC()
 
 	dest := &[]model.User{}

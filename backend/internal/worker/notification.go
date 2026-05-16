@@ -104,6 +104,7 @@ func (w *NotificationWorker) Start(ctx context.Context) {
 }
 
 func (w *NotificationWorker) check(ctx context.Context) {
+	defer observability.TimeWorkerTick("notification")()
 	select {
 	case <-ctx.Done():
 		return
@@ -273,6 +274,7 @@ func (w *NotificationWorker) sendWithRetry(
 	for attempt := 0; attempt <= maxSendRetries; attempt++ {
 		err := w.notifier.SendMessageWithMarkup(ctx, chatID, text, markup)
 		if err == nil {
+			observability.NotificationsSentTotal.WithLabelValues("sent").Inc()
 			return true
 		}
 
@@ -282,6 +284,7 @@ func (w *NotificationWorker) sendWithRetry(
 				userLabel, subName, delay, attempt+1, maxSendRetries)
 			select {
 			case <-ctx.Done():
+				observability.NotificationsSentTotal.WithLabelValues("aborted").Inc()
 				return false
 			case <-time.After(delay):
 			}
@@ -290,6 +293,17 @@ func (w *NotificationWorker) sendWithRetry(
 
 		log.Printf("[notification-worker] SEND FAILED %s sub %q (attempt %d): %v",
 			userLabel, subName, attempt+1, err)
+		// Bucket the failure: permanent (blocked/deactivated user) vs
+		// transient (network / 5xx). Alerting can ignore the permanent
+		// bucket — it's normal background churn that doesn't indicate
+		// a system problem.
+		if workerutil.IsPermanentSendFailure(err) {
+			observability.NotificationsSentTotal.WithLabelValues("permanent_failure").Inc()
+		} else if isRateLimit {
+			observability.NotificationsSentTotal.WithLabelValues("rate_limited").Inc()
+		} else {
+			observability.NotificationsSentTotal.WithLabelValues("failed").Inc()
+		}
 		return false
 	}
 	return false

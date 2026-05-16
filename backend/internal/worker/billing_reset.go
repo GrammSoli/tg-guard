@@ -60,6 +60,7 @@ func (w *BillingResetWorker) Start(ctx context.Context) {
 // is a no-op instead of double-clobbering payments members made in
 // between.
 func (w *BillingResetWorker) check(ctx context.Context) {
+	defer observability.TimeWorkerTick("billing-reset")()
 	nowUTC := time.Now().UTC()
 	// Anywhere on Earth, the local "today" can only have started within
 	// the last ~23 hours. Anything stamped more recently than that has

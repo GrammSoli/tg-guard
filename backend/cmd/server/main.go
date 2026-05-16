@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -19,6 +20,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/logger"
@@ -57,6 +59,21 @@ func main() {
 	if isTestMode {
 		log.Println("\u26a0\ufe0f  Running in TEST mode")
 	}
+
+	// \u2500\u2500 Structured logging \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+	// JSON handler on the default slog logger + the stdlib log package
+	// rewired through it, so every log.Printf in the existing codebase
+	// AND every new slog.Info call emits parseable structured records.
+	// LOG_LEVEL=debug|info|warn|error overrides the default (info).
+	// LOG_FORMAT=text falls back to the human-readable text handler \u2014
+	// useful for `make dev-backend` so the console isn't a wall of JSON.
+	setupSlog()
+
+	// \u2500\u2500 Prometheus metrics \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+	// Registered once on boot; the /metrics route mounts the standard
+	// promhttp handler below. Cheap idempotent \u2014 duplicate Register
+	// calls in tests are no-ops.
+	observability.Register()
 
 	// \u2500\u2500 Sentry / observability \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 	// No-op when SENTRY_DSN is unset. sentryFlush drains buffered events
@@ -105,6 +122,14 @@ func main() {
 	sqlDB.SetMaxIdleConns(maxIdle)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(15 * time.Minute)
+
+	// DB pool gauges fed via a 15s background poll of sql.DBStats —
+	// cheap (in-memory) and updates the Prometheus DBPoolStats gauges
+	// so alerting can fire on "in_use approaching max_open" before the
+	// pool starts queueing requests.
+	dbStatsStop := make(chan struct{})
+	observability.StartDBPoolWatcher(dbStatsStop, sqlDB, 15*time.Second)
+	defer close(dbStatsStop)
 
 	// Always ensure recently-added columns exist. Safe to run repeatedly
 	// thanks to IF NOT EXISTS. Required because RUN_MIGRATIONS is off in
@@ -430,6 +455,10 @@ func main() {
 		},
 	}))
 	app.Use(logger.New())
+	// Prometheus HTTP instrumentation — counts requests by templated
+	// path + status-class, records duration histogram. Mounted before
+	// CORS so 200-class CORS preflights also show up in the rate.
+	app.Use(observability.HTTPMiddleware())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: corsOrigins(cfg, isTestMode),
 		AllowHeaders: []string{"Content-Type", "X-Telegram-Init-Data"},
@@ -460,6 +489,12 @@ func main() {
 		}
 		return c.JSON(fiber.Map{"status": "ok", "db": dbStatus, "redis": redisStatus})
 	})
+
+	// ── Prometheus /metrics ──────────────────────────
+	// Public route by default — Prometheus scraping typically runs over
+	// an internal network. For exposed deployments, set METRICS_BEARER
+	// to require Authorization: Bearer <token> on the scrape.
+	app.Get("/metrics", adaptor.HTTPHandler(observability.MetricsHandler(os.Getenv("METRICS_BEARER"))))
 
 	// ── Webhook rate limit ─────────────────────────────
 	// /webhook routes are public (HMAC/secret verified inside the handler).
@@ -672,6 +707,64 @@ func sentryUserFromCtx(c fiber.Ctx) *observability.UserInfo {
 		TelegramID: u.TelegramID,
 		Username:   u.Username,
 	}
+}
+
+// setupSlog wires log/slog as the default logger and re-routes the
+// stdlib log package through it. After this call:
+//
+//   - slog.Info / slog.Error / etc. emit through the configured handler
+//   - the dozens of existing log.Printf call sites flow through the same
+//     handler, so the operator sees ONE stream — no half-JSON / half-text
+//     mix while the codebase migrates
+//
+// LOG_LEVEL accepts debug|info|warn|error (default info).
+// LOG_FORMAT=text picks the text handler (human-readable); anything
+// else (including empty) defaults to JSON for production scraping.
+func setupSlog() {
+	var lvl slog.Level
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
+	case "debug":
+		lvl = slog.LevelDebug
+	case "warn":
+		lvl = slog.LevelWarn
+	case "error":
+		lvl = slog.LevelError
+	default:
+		lvl = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: lvl}
+	var h slog.Handler
+	if strings.EqualFold(os.Getenv("LOG_FORMAT"), "text") {
+		h = slog.NewTextHandler(os.Stdout, opts)
+	} else {
+		h = slog.NewJSONHandler(os.Stdout, opts)
+	}
+	logger := slog.New(h)
+	slog.SetDefault(logger)
+
+	// Route stdlib log through slog so legacy log.Printf calls become
+	// structured records too. The log writer strips trailing newlines
+	// to avoid double-newline noise in JSON output.
+	log.SetFlags(0)
+	log.SetOutput(slogWriter{logger: logger})
+}
+
+// slogWriter adapts an io.Writer-style log.SetOutput target onto an
+// slog.Logger, so every log.Printf becomes a single slog.Info record
+// with the original message in the "msg" field. Anything starting with
+// "[error]" / "ERROR" routes through slog.Error so 5xx alerting on
+// log levels still works.
+type slogWriter struct{ logger *slog.Logger }
+
+func (s slogWriter) Write(p []byte) (int, error) {
+	msg := strings.TrimRight(string(p), "\n")
+	switch {
+	case strings.HasPrefix(msg, "[error]") || strings.HasPrefix(msg, "ERROR"):
+		s.logger.Error(msg)
+	default:
+		s.logger.Info(msg)
+	}
+	return len(p), nil
 }
 
 // envInt reads an integer env var with a fallback.

@@ -55,6 +55,7 @@ func (w *TrialExpiryWorker) Start(ctx context.Context) {
 // card then shows Overdue if that date is already past. Idempotent — a
 // converted row no longer matches is_trial = true.
 func (w *TrialExpiryWorker) check(ctx context.Context) {
+	defer observability.TimeWorkerTick("trial-expiry")()
 	now := time.Now().UTC()
 	res := w.db.WithContext(ctx).Model(&model.Subscription{}).
 		Where("is_trial = ? AND trial_ends_at IS NOT NULL AND trial_ends_at < ?", true, now).
