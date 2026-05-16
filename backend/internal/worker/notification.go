@@ -138,13 +138,10 @@ func (w *NotificationWorker) check(ctx context.Context) {
 	now := time.Now().UTC()
 	log.Printf("[notification-worker] ── tick ── UTC now: %s", now.Format(time.RFC3339))
 
-	// Pre-filter at the DB level: anything that could possibly land on
-	// "tomorrow" in some user's timezone is at most ~26h out from now in
-	// UTC. Widen to 20-30h to keep the query small while still admitting
-	// every plausible candidate. The precise per-user logic lives in
+	// Coarse DB pre-filter — see notificationWindow. The precise per-user
+	// "is it tomorrow + has their preferred time arrived" logic lives in
 	// shouldSendNow below.
-	windowStart := now.Add(20 * time.Hour)
-	windowEnd := now.Add(30 * time.Hour)
+	windowStart, windowEnd := notificationWindow(now)
 
 	// Track successfully-sent IDs so we can bulk-update notified_at in a
 	// single statement at the end. Stream via FindInBatches so a tick
@@ -228,6 +225,20 @@ func (w *NotificationWorker) check(ctx context.Context) {
 		}
 		persistCancel()
 	}
+}
+
+// notificationWindow is the coarse [start, end] range the DB pre-filter
+// uses to pick reminder candidates. It must be a safe SUPERSET of every
+// subscription shouldSendNow could pass: a payment that is "tomorrow" in
+// some user's timezone has next_payment_at anywhere from ~now (easternmost
+// tz, UTC+14) to ~now+48h (westernmost tz, UTC-12, late in their day).
+//
+// Returning `now` as the lower bound — not the old now+20h — is what lets a
+// subscription created the same day it falls due still receive a reminder.
+// With +20h, a sub created less than ~20h before payment was never observed
+// by a tick while it sat 20-30h out, so it got no reminder at all.
+func notificationWindow(now time.Time) (start, end time.Time) {
+	return now, now.Add(48 * time.Hour)
 }
 
 // tryProcessOne is the per-subscription gate + send loop. Returns true iff
