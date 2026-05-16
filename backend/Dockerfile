@@ -1,4 +1,9 @@
-FROM golang:1.23-alpine AS build
+# Go 1.25+ is required since the test-infrastructure dependencies
+# (testcontainers-go) bumped go.mod's minimum to 1.25.0. Prod build
+# itself doesn't ship the test deps (only files under //go:build
+# integration use them), but `go mod download` reads the directive and
+# refuses to run on a lower toolchain.
+FROM golang:1.25-alpine AS build
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
