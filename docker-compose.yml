@@ -81,7 +81,13 @@ services:
   postgres-backup:
     image: prodrigestivill/postgres-backup-local:16
     restart: unless-stopped
-    user: postgres:postgres
+    # The image's /init.sh entry point needs root to chown the
+    # /backups mount to the internal postgres user before su'ing to
+    # it for the actual pg_dump. Forcing `user: postgres:postgres`
+    # from the outside skips that chown and lands us at "BACKUP_DIR
+    # points to a file or folder with insufficient permissions."
+    # Trade-off: the schedule loop runs as root inside the container,
+    # but the dump itself runs as postgres internally.
     volumes:
       - ./backups:/backups
     depends_on:
