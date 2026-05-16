@@ -324,6 +324,15 @@ func main() {
 		workerutil.Supervise("room-reminder", func() { roomReminderWorker.Start(ctx) })
 	}()
 
+	// Trial-expiry worker — converts trials whose trial_ends_at has passed
+	// into regular subscriptions, so a lapsed trial stops reading as one.
+	trialExpiryWorker := worker.NewTrialExpiryWorker(db)
+	workerWG.Add(1)
+	go func() {
+		defer workerWG.Done()
+		workerutil.Supervise("trial-expiry", func() { trialExpiryWorker.Start(ctx) })
+	}()
+
 	// ── Fiber app ──────────────────────────────────────
 	app := fiber.New(fiber.Config{
 		AppName:      "SubGuard API",
