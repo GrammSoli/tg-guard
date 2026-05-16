@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -279,9 +280,26 @@ func (h *AdminHandler) Broadcast(c fiber.Ctx) error {
 	})
 }
 
+// broadcastAPIConcurrency caps in-flight sendOne calls. Same rationale
+// as bot/broadcast.go broadcastConcurrency — see audit Tier-3 #6.
+const broadcastAPIConcurrency = 8
+
+// broadcastUserJob carries the per-recipient data the worker pool needs.
+// Locale-resolved text is computed inside the producer (cheap) so the
+// pool can stay agnostic to language fallback.
+type broadcastUserJob struct {
+	chatID int64
+	text   string
+}
+
 // runBroadcast streams users in batches and sends Telegram messages while
 // honouring the server's lifecycle context. Cancellation on SIGTERM is
 // respected; a hung Telegram API call is bounded by a per-send timeout.
+//
+// Sends run through a worker pool gated by broadcastTickInterval — the
+// previous sequential `ticker.Wait; sendOne` couldn't reach the rate
+// cap on high-latency networks because each send blocked for its own
+// round-trip. Mirrors the bot/broadcast.go fix.
 func (h *AdminHandler) runBroadcast(textRU, textEN, imageURL string) {
 	ctx, cancel := context.WithTimeout(h.appCtx, 24*time.Hour)
 	defer cancel()
@@ -289,7 +307,24 @@ func (h *AdminHandler) runBroadcast(textRU, textEN, imageURL string) {
 	ticker := time.NewTicker(broadcastTickInterval)
 	defer ticker.Stop()
 
-	var sent, failed int
+	var sent, failed int64
+
+	jobCh := make(chan broadcastUserJob, broadcastAPIConcurrency*2)
+	var wg sync.WaitGroup
+	for i := 0; i < broadcastAPIConcurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				if h.sendOne(ctx, job.chatID, job.text, imageURL) {
+					atomic.AddInt64(&sent, 1)
+				} else {
+					atomic.AddInt64(&failed, 1)
+				}
+			}
+		}()
+	}
+
 	// Exclude banned, soft-deleted, and inactive (bot-blocked) users from
 	// the broadcast roster. Mirrors the filter in bot/broadcast.go and
 	// repository.CountBroadcastRecipients so the queued/recipients count
@@ -317,20 +352,29 @@ func (h *AdminHandler) runBroadcast(textRU, textEN, imageURL string) {
 				if msgText == "" {
 					msgText = textEN
 				}
+				if msgText == "" {
+					// No text in either locale — skip rather than send
+					// a blank message.
+					continue
+				}
 
-				if h.sendOne(ctx, u.TelegramID, msgText, imageURL) {
-					sent++
-				} else {
-					failed++
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case jobCh <- broadcastUserJob{chatID: u.TelegramID, text: msgText}:
 				}
 			}
 			return nil
 		}).Error
 
+	close(jobCh)
+	wg.Wait()
+
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		log.Printf("[broadcast] batch iteration error: %v", err)
 	}
-	log.Printf("[broadcast] finished: %d sent, %d failed", sent, failed)
+	log.Printf("[broadcast] finished: %d sent, %d failed",
+		atomic.LoadInt64(&sent), atomic.LoadInt64(&failed))
 }
 
 // sendOne performs a single Telegram send with a bounded per-call timeout

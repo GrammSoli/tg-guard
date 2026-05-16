@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
@@ -14,6 +16,16 @@ import (
 
 	"github.com/subguard/backend/internal/model"
 	"github.com/subguard/backend/internal/workerutil"
+)
+
+// broadcastConcurrency caps in-flight CopyMessage calls. Telegram's
+// global send-rate limit for a bot is ~30 msg/s; the broadcastTick
+// (40ms = 25/s) is the actual rate gate, the pool size just lets
+// individual sends overlap so high per-send latency doesn't drop
+// effective throughput below the tick rate. Audit Tier-3 #6.
+const (
+	broadcastConcurrency = 8
+	broadcastTick        = 40 * time.Millisecond
 )
 
 // ── FSM state for broadcast ───────────────────────────
@@ -222,7 +234,11 @@ func (bh *broadcastHandler) runBroadcast(b *tgbot.Bot, lang string, fromChatID i
 	ctx, cancel := context.WithTimeout(bh.panel.appCtx, 24*time.Hour)
 	defer cancel()
 
-	var sent, failed int
+	// sent / failed must be int64 for atomic ops — workers update them
+	// from inside the goroutine pool, so a non-atomic int would race
+	// (go test -race would catch it; production would silently report
+	// truncated counts to the admin report at the end).
+	var sent, failed int64
 
 	// Build the base query with language + active-user filters. Inactive
 	// users (those who blocked the bot — is_active=false set by the
@@ -240,40 +256,73 @@ func (bh *broadcastHandler) runBroadcast(b *tgbot.Bot, lang string, fromChatID i
 		q = q.Where("LOWER(locale) = 'en' OR locale IS NULL OR locale = ''")
 	}
 
-	// Stream users in chunks of 500 — never load the entire table into RAM.
+	// Worker pool + token-bucket ticker. The previous implementation did
+	// sequential `copyOne(...); sleep(50ms)`, which on slow international
+	// links dropped effective throughput below the rate cap because each
+	// send blocked for its own latency. The new pool overlaps in-flight
+	// sends up to broadcastConcurrency, gated by a global ticker at the
+	// Telegram-safe rate. For a 500k-user campaign on healthy latency
+	// this brings completion from ~7 hours down to ~5.5 hours (peak rate
+	// 25/s vs the prior ~20/s, AND closer to the cap because latency no
+	// longer steals from the tick budget).
+	chatCh := make(chan int64, broadcastConcurrency*2)
+	ticker := time.NewTicker(broadcastTick)
+	defer ticker.Stop()
+
+	var wg sync.WaitGroup
+	for i := 0; i < broadcastConcurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for chatID := range chatCh {
+				if bh.copyOne(ctx, b, fromChatID, messageID, chatID) {
+					atomic.AddInt64(&sent, 1)
+				} else {
+					atomic.AddInt64(&failed, 1)
+				}
+			}
+		}()
+	}
+
+	// Stream users in chunks of 500 — never load the entire table into
+	// RAM — and feed each TelegramID into the worker pool one tick at
+	// a time so the GLOBAL emit rate stays at broadcastTick regardless
+	// of how many workers are idle vs busy.
 	err := q.FindInBatches(&[]model.User{}, 500, func(tx *gorm.DB, _ int) error {
 		users, ok := tx.Statement.Dest.(*[]model.User)
 		if !ok {
 			return errors.New("broadcast: unexpected batch dest type")
 		}
 		for _, u := range *users {
-			if bh.copyOne(ctx, b, fromChatID, messageID, u.TelegramID) {
-				sent++
-			} else {
-				failed++
-			}
-
-			// Throttle: ~20 msg/s to stay under Telegram's rate limits.
-			// Context-aware sleep so SIGTERM cancels within ≤50ms instead
-			// of having to wait for the full 500k-user × 50ms iteration —
-			// the bare time.Sleep blocked the shutdown drain window.
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(50 * time.Millisecond):
+			case <-ticker.C:
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case chatCh <- u.TelegramID:
 			}
 		}
 		return nil
 	}).Error
 
+	// Signal workers to drain and exit, then wait for them so the final
+	// sent/failed counts are stable before we report.
+	close(chatCh)
+	wg.Wait()
+
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		log.Printf("[broadcast] batch iteration error: %v", err)
 	}
 
-	log.Printf("[broadcast] finished: %d sent, %d failed", sent, failed)
+	finalSent := atomic.LoadInt64(&sent)
+	finalFailed := atomic.LoadInt64(&failed)
+	log.Printf("[broadcast] finished: %d sent, %d failed", finalSent, finalFailed)
 
 	// Send completion report to admin.
-	report := fmt.Sprintf("✅ *Рассылка завершена!*\n\n📤 Успешно: *%d*\n❌ Ошибок: *%d*", sent, failed)
+	report := fmt.Sprintf("✅ *Рассылка завершена!*\n\n📤 Успешно: *%d*\n❌ Ошибок: *%d*", finalSent, finalFailed)
 	b.SendMessage(ctx, &tgbot.SendMessageParams{
 		ChatID:    adminTgID,
 		Text:      report,

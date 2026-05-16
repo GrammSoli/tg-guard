@@ -23,6 +23,13 @@ import (
 // worker can't OOM if a single tick has tens of thousands of due rows.
 const notificationBatchSize = 500
 
+// persistChunkSize caps how many IDs we cram into a single bulk-update
+// IN (…) clause. PostgreSQL's extended-protocol parameter limit is
+// 65535; we leave plenty of headroom so a backlogged tick (e.g. worker
+// caught up after a long outage) doesn't trip the limit and leave
+// reminders un-marked. Audit Tier-3 #3.
+const persistChunkSize = 1000
+
 // maxSendRetries caps retry_after-driven retries per subscription on a
 // 429 from Telegram. Two retries plus the original attempt is enough for
 // the typical Bot API back-off; on a third failure we give up for this
@@ -191,22 +198,35 @@ func (w *NotificationWorker) check(ctx context.Context) {
 		log.Printf("[notification-worker] processed %d candidates, sent %d reminders", seen, sentCount)
 	}
 
-	// Bulk-persist notified_at. Use a fresh short context so that even on
-	// SIGTERM mid-tick we still record what already went out — otherwise
-	// the next worker start would re-send the same reminders. The parent
-	// ctx may be cancelled at this point, so we deliberately start from
-	// context.Background() with a 5s budget.
-	if len(sentIDs) > 0 {
+	// Bulk-persist notified_at in chunks. Use a fresh short context per
+	// chunk so that even on SIGTERM mid-tick we still record what already
+	// went out — otherwise the next worker start would re-send the same
+	// reminders. The parent ctx may be cancelled at this point, so we
+	// deliberately start from context.Background() with a per-chunk
+	// budget.
+	//
+	// Chunking by persistChunkSize is required because PostgreSQL caps
+	// statement parameters at 65535. A single `WHERE id IN (?, ?, …)`
+	// for, say, 30k subs in a backlogged tick would silently fail with
+	// "extended protocol limited to 65535 parameters" and leave all
+	// those subs un-marked → duplicate reminders on the next tick.
+	// Audit Tier-3 #3.
+	for start := 0; start < len(sentIDs); start += persistChunkSize {
+		end := start + persistChunkSize
+		if end > len(sentIDs) {
+			end = len(sentIDs)
+		}
+		chunk := sentIDs[start:end]
 		persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer persistCancel()
 		if err := w.db.WithContext(persistCtx).
 			Model(&model.Subscription{}).
-			Where("id IN ?", sentIDs).
+			Where("id IN ?", chunk).
 			Update("notified_at", now).Error; err != nil {
-			log.Printf("[notification-worker] bulk notified_at update failed for %d subs: %v",
-				len(sentIDs), err)
+			log.Printf("[notification-worker] bulk notified_at update failed for chunk %d-%d of %d: %v",
+				start, end, len(sentIDs), err)
 			observability.CaptureException(err)
 		}
+		persistCancel()
 	}
 }
 

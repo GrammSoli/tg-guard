@@ -66,8 +66,19 @@ func (n *TelegramNotifier) SendMessageWithMarkup(ctx context.Context, chatID int
 	return err
 }
 
+// telegramUploadTimeout bounds the per-call wait on Telegram's
+// SendDocument. Documents are user-export JSONs (typically a few KB to
+// ~100 KB) so 60s is a generous upper bound on a healthy network; the
+// fast/normal path is sub-second. Without this ceiling a hung Telegram
+// upload would tie up the calling goroutine indefinitely — see
+// handler/user.go ExportMe which fires this from a Supervise'd
+// goroutine bound only by the worker drain timeout. Audit Tier-3 #5.
+const telegramUploadTimeout = 60 * time.Second
+
 func (n *TelegramNotifier) SendDocument(ctx context.Context, chatID int64, filename string, content []byte, caption string) error {
-	_, err := n.bot.SendDocument(ctx, &bot.SendDocumentParams{
+	sendCtx, cancel := context.WithTimeout(ctx, telegramUploadTimeout)
+	defer cancel()
+	_, err := n.bot.SendDocument(sendCtx, &bot.SendDocumentParams{
 		ChatID: chatID,
 		Document: &models.InputFileUpload{
 			Filename: filename,

@@ -23,10 +23,21 @@ import (
 	"time"
 )
 
-// supervisorCooldown is the pause between a worker panic and the restart
-// attempt. Long enough to keep panic loops from drowning the log; short
-// enough that operators don't notice an outage in normal monitoring.
-const supervisorCooldown = 5 * time.Second
+// supervisorCooldownInitial / Max bracket the exponential backoff
+// between successive panics. The first restart waits
+// supervisorCooldownInitial; each subsequent panic-restart cycle
+// doubles the wait up to supervisorCooldownMax.
+//
+// Was a fixed 5s, which let a deterministically-panicking worker
+// (broken migration, nil-pointer in hot path) spin at 12 panics/min
+// indefinitely, drowning logs and burning Sentry quota. Exponential
+// growth caps the damage at ~1 panic/min once the loop has been
+// hammering for a few cycles, while still recovering quickly from
+// genuine transient panics. Audit Tier-3 #7.
+const (
+	supervisorCooldownInitial = 5 * time.Second
+	supervisorCooldownMax     = 60 * time.Second
+)
 
 // PanicHook, when set, is invoked on every recovered worker panic with
 // the worker name, the recovered value, and the captured stack. main.go
@@ -52,6 +63,7 @@ var PanicHook func(source string, recovered interface{}, stack []byte)
 // The wrapped fn should be the worker's Start method or equivalent loop —
 // NOT a single tick. Supervise is intended for top-level goroutines.
 func Supervise(name string, fn func()) {
+	cooldown := supervisorCooldownInitial
 	for {
 		exited := func() (panicked bool) {
 			defer func() {
@@ -74,8 +86,17 @@ func Supervise(name string, fn func()) {
 			// returned, the parent goroutine is done.
 			return
 		}
-		log.Printf("[%s] restarting after cooldown of %s", name, supervisorCooldown)
-		time.Sleep(supervisorCooldown)
+		log.Printf("[%s] restarting after cooldown of %s", name, cooldown)
+		time.Sleep(cooldown)
+		// Double the wait for the next panic-restart cycle, capped at
+		// supervisorCooldownMax. A run that survives long enough to hit
+		// the graceful exit branch above won't reach this code path, so
+		// the backoff only escalates while the worker is genuinely
+		// stuck in a panic loop.
+		cooldown *= 2
+		if cooldown > supervisorCooldownMax {
+			cooldown = supervisorCooldownMax
+		}
 	}
 }
 

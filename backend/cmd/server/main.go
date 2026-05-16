@@ -129,6 +129,25 @@ func main() {
 		// get NULL and will be reset on the first eligible tick — that
 		// matches the previous behaviour, no surprise resets.
 		runMigration("shared_rooms.last_billing_reset_at", `ALTER TABLE shared_rooms ADD COLUMN IF NOT EXISTS last_billing_reset_at TIMESTAMPTZ`)
+		// Performance indexes (audit Tier-3 #1, #2):
+		//
+		//   idx_sub_due_unsent — covers the notification worker's hot
+		//   query `WHERE next_payment_at BETWEEN ? AND ? AND
+		//   (notified_at IS NULL OR notified_at < ?)`. The full table
+		//   scan it replaces grew linearly with the subs table; on
+		//   100k rows the worker tick took >1s per fire and that's
+		//   roughly half our scheduling-precision budget. Partial-on-
+		//   notified_at-NULL captures the common case (most due rows
+		//   haven't been pinged yet) without bloating the index for
+		//   already-sent rows.
+		runMigration("idx_sub_due_unsent", `CREATE INDEX IF NOT EXISTS idx_sub_due_unsent ON subscriptions (next_payment_at) WHERE notified_at IS NULL`)
+		runMigration("idx_sub_notified_at", `CREATE INDEX IF NOT EXISTS idx_sub_notified_at ON subscriptions (notified_at) WHERE notified_at IS NOT NULL`)
+		//
+		//   idx_sub_brand_name — supports the admin GetPopularServices
+		//   GROUP BY (brand, name). The current HashAggregate on a
+		//   full scan is fine at thousands of rows; this index keeps
+		//   the query sub-100ms as the table grows past ~100k subs.
+		runMigration("idx_sub_brand_name", `CREATE INDEX IF NOT EXISTS idx_sub_brand_name ON subscriptions (brand, name)`)
 		// NOTE: a previous destructive UPDATE backfill lived here. It set
 		// `price_crypto_*` to 1/10/2/20 whenever the existing value was 0
 		// — silently overriding a legitimate admin choice of 0 on every

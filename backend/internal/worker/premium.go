@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -50,55 +51,67 @@ func (w *PremiumWorker) Start(ctx context.Context) {
 	}
 }
 
+// premiumBatchSize streams expired users in chunks so a worker tick
+// that runs after a long outage (or simply at a large scale) can't OOM
+// loading the whole expired-grant set into one slice. Audit Tier-3 #4.
+const premiumBatchSize = 500
+
 // check finds every user with an active, time-limited Premium grant
 // that has elapsed, downgrades them (is_donator=false,
 // premium_expires_at=NULL) and DMs a localized notice. Each user is
 // handled independently so one failed send/update doesn't block the
 // rest of the batch.
+//
+// Streamed via FindInBatches — the previous unbounded `Find(&expired)`
+// would materialise every lapsed grant into memory at once. Fine when
+// the worker ticks hourly on a healthy DB; hazardous if it falls behind
+// (deploy outage, DB maintenance window) and 50k+ Premium grants pile
+// up. Now peak memory is bounded by the batch size regardless of how
+// far behind we are.
 func (w *PremiumWorker) check(ctx context.Context) {
 	now := time.Now().UTC()
 
-	var expired []model.User
+	dest := &[]model.User{}
 	err := w.db.WithContext(ctx).
 		Where("is_donator = ? AND premium_expires_at IS NOT NULL AND premium_expires_at < ?", true, now).
-		Find(&expired).Error
-	if err != nil {
-		log.Printf("[premium-worker] query error: %v", err)
+		FindInBatches(dest, premiumBatchSize, func(tx *gorm.DB, batchNum int) error {
+			batch, ok := tx.Statement.Dest.(*[]model.User)
+			if !ok {
+				return errors.New("premium-worker: unexpected batch dest type")
+			}
+			for i := range *batch {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+				u := &(*batch)[i]
+
+				res := w.db.WithContext(ctx).Model(&model.User{}).
+					Where("id = ? AND is_donator = ?", u.ID, true).
+					Updates(map[string]interface{}{
+						"is_donator":         false,
+						"premium_expires_at": nil,
+					})
+				if res.Error != nil {
+					log.Printf("[premium-worker] downgrade user=%d error: %v", u.ID, res.Error)
+					observability.CaptureException(res.Error)
+					continue
+				}
+				if res.RowsAffected == 0 {
+					// Already downgraded by a racing path (e.g. admin) — skip.
+					continue
+				}
+				log.Printf("[premium-worker] downgraded user=%d (premium expired %s)",
+					u.ID, u.PremiumExpiresAt)
+
+				w.notifyExpired(ctx, u)
+			}
+			return nil
+		}).Error
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		log.Printf("[premium-worker] query/iteration error: %v", err)
 		observability.CaptureException(err)
-		return
-	}
-	if len(expired) == 0 {
-		return
-	}
-	log.Printf("[premium-worker] %d expired Premium grant(s) to downgrade", len(expired))
-
-	for i := range expired {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		u := &expired[i]
-
-		res := w.db.WithContext(ctx).Model(&model.User{}).
-			Where("id = ? AND is_donator = ?", u.ID, true).
-			Updates(map[string]interface{}{
-				"is_donator":         false,
-				"premium_expires_at": nil,
-			})
-		if res.Error != nil {
-			log.Printf("[premium-worker] downgrade user=%d error: %v", u.ID, res.Error)
-			observability.CaptureException(res.Error)
-			continue
-		}
-		if res.RowsAffected == 0 {
-			// Already downgraded by a racing path (e.g. admin) — skip.
-			continue
-		}
-		log.Printf("[premium-worker] downgraded user=%d (premium expired %s)",
-			u.ID, u.PremiumExpiresAt)
-
-		w.notifyExpired(ctx, u)
 	}
 }
 
