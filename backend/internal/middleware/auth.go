@@ -127,7 +127,15 @@ func AuthMiddleware(botToken string, db *gorm.DB) fiber.Handler {
 				"deleted_at": gorm.Expr("NULL"),
 				"updated_at": gorm.Expr("NOW()"),
 			}),
-		}).Create(&user).Error; upsertErr != nil {
+		},
+			// RETURNING * — the struct above only sets identity/profile
+			// fields, so without this every column absent from it
+			// (is_donator, premium_expires_at, traffic_source_id, timezone,
+			// base_currency, notification_*) comes back as a Go zero-value.
+			// GetMe reads the context user verbatim, so it would report a
+			// paying user as free and drop their saved settings.
+			clause.Returning{},
+		).Create(&user).Error; upsertErr != nil {
 			log.Printf("[auth] upsert tg=%d: %v", tgUser.ID, upsertErr)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "database error",
