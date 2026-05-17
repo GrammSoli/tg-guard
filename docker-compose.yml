@@ -25,6 +25,8 @@ services:
         VITE_APP_VERSION: ${VITE_APP_VERSION:-}
         VITE_BOT_USERNAME: ${VITE_BOT_USERNAME:-SubGuardBot}
         VITE_SUPPORT_URL: ${VITE_SUPPORT_URL:-}
+        VITE_PRIVACY_POLICY_URL: ${VITE_PRIVACY_POLICY_URL:-}
+        VITE_TERMS_OF_SERVICE_URL: ${VITE_TERMS_OF_SERVICE_URL:-}
     volumes:
       - frontend_dist:/output
     entrypoint: ["sh", "-c", "cp -r /app/dist/* /output/ && echo 'Frontend copied.'"]

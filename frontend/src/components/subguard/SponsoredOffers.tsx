@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowUpRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { brandfetchIcon } from "@/lib/brandfetch";
+import { useDragScroll } from "@/hooks/useDragScroll";
 import { BrandIcon } from "./BrandIcon";
 import type { SponsoredOffer } from "@/types/subscription";
 import type { BrandKey } from "@/types/subscription";
@@ -19,6 +20,7 @@ export function SponsoredOffers() {
   const { t } = useTranslation();
   const [offers, setOffers] = useState<SponsoredOffer[]>([]);
   const sectionRef = useRef<HTMLElement>(null);
+  const scrollRef = useDragScroll<HTMLDivElement>();
   const viewedRef = useRef(false);
 
   useEffect(() => {
@@ -91,7 +93,10 @@ export function SponsoredOffers() {
       <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {t("sponsored.title")}
       </p>
-      <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        ref={scrollRef}
+        className="-mx-5 flex cursor-grab gap-3 overflow-x-auto px-5 pb-2 select-none active:cursor-grabbing [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {offers.map((o) => (
           <a
             key={o.id}
@@ -115,6 +120,7 @@ export function SponsoredOffers() {
                     <img
                       src={v}
                       alt={o.title}
+                      draggable={false}
                       className="h-10 w-10 shrink-0 rounded-full object-cover"
                     />
                   );
@@ -131,6 +137,7 @@ export function SponsoredOffers() {
                       <img
                         src={url}
                         alt={o.title}
+                        draggable={false}
                         className="h-10 w-10 shrink-0 rounded-full object-cover"
                       />
                     );
