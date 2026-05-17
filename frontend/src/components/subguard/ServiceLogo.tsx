@@ -41,11 +41,21 @@ export function ServiceLogo({
   // Resolve the CDN URL: explicit domain prop wins; otherwise look up
   // the catalog. Round to the next 16-px bucket so a screen rendering
   // 18px, 20px, 22px logos all share one cache entry on the CDN.
+  //
+  // theme=dark looks counter-intuitive but matches Brandfetch's API
+  // convention: "theme/dark" means "the variant optimised FOR a dark
+  // background" — i.e. the white/light-coloured logo. Our app is
+  // dark-themed end-to-end (Dashboard.tsx is bg-background which is
+  // the dark surface), so we always want the light logo variant.
+  // If a brand doesn't publish a dark-theme variant, Brandfetch
+  // falls back to the default colour logo, which usually still reads
+  // fine on dark surfaces.
   const resolvedDomain = domain ?? domainFor(brand);
   const cdnSize = Math.max(16, Math.ceil(size / 16) * 16);
   const cdnUrl = brandfetchIcon(resolvedDomain, {
     size: cdnSize,
     type: "icon",
+    theme: "dark",
     fallback: "transparent",
   });
 
