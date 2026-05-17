@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { brandColorFor } from "@/lib/brandLogo";
+import { brandfetchIcon } from "@/lib/brandfetch";
+import { domainFor } from "@/lib/mockData";
 import type { BrandKey } from "@/types/subscription";
 
 interface Props {
@@ -8,11 +10,22 @@ interface Props {
   size?: number;
   className?: string;
   rounded?: "full" | "xl" | "2xl";
+  /** Optional domain override. When omitted, the catalog mapping in
+   *  mockData.ts (domainFor) supplies the domain for the brand. */
+  domain?: string;
 }
 
 /**
  * Universal service logo with guaranteed fallback.
- * Tries /icons/{brand}.svg first, then shows a gradient circle with the first letter.
+ *
+ * Source order:
+ *   1. Brandfetch CDN (`cdn.brandfetch.io/{domain}?c=...`) — high
+ *      quality, theme-aware, ~500 brands covered by free tier.
+ *      Requires VITE_BRANDFETCH_CLIENT_ID. Domain is taken from the
+ *      explicit `domain` prop or the catalog mapping for `brand`.
+ *   2. Gradient first-letter tile — used when Brandfetch errors,
+ *      when no clientId is configured, or when the brand has no
+ *      catalog entry (legacy / custom).
  */
 export function ServiceLogo({
   brand,
@@ -20,22 +33,36 @@ export function ServiceLogo({
   size = 48,
   className = "",
   rounded = "2xl",
+  domain,
 }: Props) {
   const [failed, setFailed] = useState(false);
   const color = brandColorFor(brand);
-  const iconPath = `https://thesvg.org/icons/${brand}/default.svg`;
+
+  // Resolve the CDN URL: explicit domain prop wins; otherwise look up
+  // the catalog. Round to the next 16-px bucket so a screen rendering
+  // 18px, 20px, 22px logos all share one cache entry on the CDN.
+  const resolvedDomain = domain ?? domainFor(brand);
+  const cdnSize = Math.max(16, Math.ceil(size / 16) * 16);
+  const cdnUrl = brandfetchIcon(resolvedDomain, {
+    size: cdnSize,
+    type: "icon",
+    fallback: "transparent",
+  });
+
   const letter = (name || brand || "?").charAt(0).toUpperCase();
   const roundedClass =
     rounded === "full" ? "rounded-full" : rounded === "xl" ? "rounded-xl" : "rounded-2xl";
+
+  const showImage = cdnUrl && !failed;
 
   return (
     <span
       className={`inline-flex shrink-0 items-center justify-center overflow-hidden ${roundedClass} ${className}`}
       style={{ width: size, height: size }}
     >
-      {!failed ? (
+      {showImage ? (
         <img
-          src={iconPath}
+          src={cdnUrl}
           alt={name}
           width={size}
           height={size}

@@ -14,7 +14,17 @@ services:
 
   # ── Frontend build — one-shot, copies dist to volume ─
   frontend-build:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # VITE_* args mirror frontend/.env.example. Set them in the
+      # host .env (same file as POSTGRES_*) and they're forwarded
+      # into the build at `docker compose build frontend-build`.
+      args:
+        VITE_BRANDFETCH_CLIENT_ID: ${VITE_BRANDFETCH_CLIENT_ID:-}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_APP_VERSION: ${VITE_APP_VERSION:-}
+        VITE_BOT_USERNAME: ${VITE_BOT_USERNAME:-SubGuardBot}
+        VITE_SUPPORT_URL: ${VITE_SUPPORT_URL:-}
     volumes:
       - frontend_dist:/output
     entrypoint: ["sh", "-c", "cp -r /app/dist/* /output/ && echo 'Frontend copied.'"]
