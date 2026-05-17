@@ -21,6 +21,7 @@ import {
 import { SERVICE_CATEGORIES, type ServiceCategory } from "@/lib/mockData";
 import { categoryKey } from "@/lib/categoryKey";
 import { hapticImpact, hapticSelection } from "@/lib/telegram";
+import { useTelegramViewportHeight } from "@/hooks/use-telegram-viewport";
 
 interface Props {
   open: boolean;
@@ -46,6 +47,7 @@ const TYPE_OPTIONS: FilterType[] = ["subscription", "room"];
  */
 export function FilterSheet({ open, onOpenChange }: Props) {
   const { t } = useTranslation();
+  const tgVh = useTelegramViewportHeight();
 
   const sortBy = useSubscriptionStore((s) => s.sortBy);
   const filterTypes = useSubscriptionStore((s) => s.filterTypes);
@@ -102,7 +104,8 @@ export function FilterSheet({ open, onOpenChange }: Props) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="max-h-[85vh] overflow-y-auto rounded-t-3xl"
+        className="overflow-y-auto rounded-t-3xl"
+        style={{ maxHeight: `${Math.round(tgVh * 0.85)}px` }}
       >
         <SheetHeader className="text-left">
           <SheetTitle>{t("filter.sheetTitle")}</SheetTitle>

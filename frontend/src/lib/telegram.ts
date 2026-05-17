@@ -119,6 +119,64 @@ export function expandMiniApp() {
   } catch { /* noop */ }
 }
 
+// ─── Viewport ──────────────────────────────────────────────────
+
+/**
+ * Notify Telegram that the WebApp UI is ready. Should be called once,
+ * as early as possible — typically in main.tsx. Hides the loading
+ * placeholder Telegram shows before our React app paints, and is the
+ * prerequisite for some other WebApp APIs to behave correctly.
+ */
+export function tgReady() {
+  try {
+    (tg()?.ready as (() => void) | undefined)?.();
+  } catch { /* noop */ }
+}
+
+type ViewportEventHandler = () => void;
+
+/**
+ * Subscribe to Telegram's viewportChanged event. Returns an unsubscribe
+ * function. No-op outside Telegram.
+ *
+ * Why this matters: on iOS, when the on-screen keyboard appears,
+ * Telegram fires viewportChanged with a smaller viewportHeight (the
+ * remaining space above the keyboard). CSS `100vh` does NOT shrink
+ * with the keyboard on iOS Safari/WebView — only `100dvh` does, and
+ * even that has edge cases inside Telegram's WebView. Reading
+ * viewportStableHeight from this event is the authoritative way to
+ * size scrollable sheets so they don't get clipped by the keyboard.
+ */
+export function onTelegramViewportChanged(handler: ViewportEventHandler): () => void {
+  try {
+    const w = tg() as { onEvent?: (e: string, h: () => void) => void; offEvent?: (e: string, h: () => void) => void } | null;
+    if (!w?.onEvent) return () => {};
+    w.onEvent("viewportChanged", handler);
+    return () => {
+      try { w.offEvent?.("viewportChanged", handler); } catch { /* noop */ }
+    };
+  } catch {
+    return () => {};
+  }
+}
+
+/**
+ * Current Telegram viewport height in pixels. Prefers
+ * viewportStableHeight (the height the WebApp settles at AFTER the
+ * keyboard is dismissed) over viewportHeight, falling back to
+ * window.innerHeight outside Telegram. Read at call time — for
+ * reactivity use useTelegramViewportHeight() in components.
+ */
+export function getTelegramViewportHeight(): number {
+  try {
+    const w = tg() as { viewportStableHeight?: number; viewportHeight?: number } | null;
+    const v = w?.viewportStableHeight ?? w?.viewportHeight;
+    if (typeof v === "number" && v > 0) return v;
+  } catch { /* noop */ }
+  if (typeof window !== "undefined") return window.innerHeight;
+  return 0;
+}
+
 // ─── External links ────────────────────────────────────────────
 
 /**

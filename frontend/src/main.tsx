@@ -3,8 +3,16 @@ import ReactDOM from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import * as Sentry from "@sentry/react";
 import { getRouter } from "./router";
+import { expandMiniApp, tgReady } from "@/lib/telegram";
 import "./styles.css";
 import "@/lib/i18n";
+
+// Tell Telegram the WebApp is alive (hides the platform spinner) and
+// expand the WebView to full height. Done before mount so the
+// viewportChanged event from expand() is dispatched against a viewport
+// that already has its post-expand dimensions when components subscribe.
+tgReady();
+expandMiniApp();
 
 // ── Sentry ───────────────────────────────────────────────
 // No-op when VITE_SENTRY_DSN is unset (local dev needs no account).
