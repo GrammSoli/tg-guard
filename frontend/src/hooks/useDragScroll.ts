@@ -1,87 +1,89 @@
-import { useRef, useCallback, useEffect } from "react";
+import { useCallback, useRef } from "react";
 
 /**
  * useDragScroll — enables horizontal drag-to-scroll on desktop.
  *
- * Returns a ref to attach to the scrollable container.
+ * Returns a callback ref to attach to the scrollable container.
+ * A callback ref (rather than a RefObject + useEffect) is required so
+ * the listeners attach at the moment the node actually mounts — some
+ * consumers render the container conditionally (e.g. SponsoredOffers
+ * returns null until its data loads), and a one-shot useEffect would
+ * run before that node ever exists.
+ *
  * Automatically prevents click events when the user drags more than
- * `CLICK_THRESHOLD` pixels, so filter buttons don't fire on swipe.
+ * `CLICK_THRESHOLD` pixels, so links/buttons don't fire on swipe.
  */
 const CLICK_THRESHOLD = 5;
 
 export function useDragScroll<T extends HTMLElement = HTMLDivElement>() {
-  const ref = useRef<T>(null);
   const state = useRef({
     isDown: false,
     startX: 0,
     scrollLeft: 0,
     dragged: false,
   });
+  const cleanupRef = useRef<(() => void) | null>(null);
 
-  const onMouseDown = useCallback((e: MouseEvent) => {
-    const el = ref.current;
+  return useCallback((el: T | null) => {
+    // Detach from a previous node (or on unmount, when el is null).
+    cleanupRef.current?.();
+    cleanupRef.current = null;
     if (!el) return;
-    state.current.isDown = true;
-    state.current.dragged = false;
-    state.current.startX = e.pageX - el.offsetLeft;
-    state.current.scrollLeft = el.scrollLeft;
-    el.style.cursor = "grabbing";
-  }, []);
 
-  const onMouseMove = useCallback((e: MouseEvent) => {
-    const el = ref.current;
-    if (!el || !state.current.isDown) return;
-    e.preventDefault();
-    const x = e.pageX - el.offsetLeft;
-    const walk = x - state.current.startX;
-    if (Math.abs(walk) > CLICK_THRESHOLD) {
-      state.current.dragged = true;
-    }
-    el.scrollLeft = state.current.scrollLeft - walk;
-  }, []);
+    const s = state.current;
 
-  const onMouseUp = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    state.current.isDown = false;
-    el.style.cursor = "";
-  }, []);
+    const onMouseDown = (e: MouseEvent) => {
+      s.isDown = true;
+      s.dragged = false;
+      s.startX = e.pageX - el.offsetLeft;
+      s.scrollLeft = el.scrollLeft;
+      el.style.cursor = "grabbing";
+    };
 
-  const onMouseLeave = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    state.current.isDown = false;
-    el.style.cursor = "";
-  }, []);
-
-  // Capture click events and cancel them if we dragged
-  const onClick = useCallback((e: MouseEvent) => {
-    if (state.current.dragged) {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!s.isDown) return;
       e.preventDefault();
-      e.stopPropagation();
-      state.current.dragged = false;
-    }
-  }, []);
+      const x = e.pageX - el.offsetLeft;
+      const walk = x - s.startX;
+      if (Math.abs(walk) > CLICK_THRESHOLD) {
+        s.dragged = true;
+      }
+      el.scrollLeft = s.scrollLeft - walk;
+    };
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
+    const onMouseUp = () => {
+      s.isDown = false;
+      el.style.cursor = "";
+    };
+
+    const onMouseLeave = () => {
+      s.isDown = false;
+      el.style.cursor = "";
+    };
+
+    // Capture click events and cancel them if we dragged.
+    const onClick = (e: MouseEvent) => {
+      if (s.dragged) {
+        e.preventDefault();
+        e.stopPropagation();
+        s.dragged = false;
+      }
+    };
 
     el.addEventListener("mousedown", onMouseDown);
     el.addEventListener("mousemove", onMouseMove);
     el.addEventListener("mouseup", onMouseUp);
     el.addEventListener("mouseleave", onMouseLeave);
-    // Use capture phase so we intercept before button onClick fires
+    // Capture phase so we intercept before child onClick fires.
     el.addEventListener("click", onClick, true);
 
-    return () => {
+    cleanupRef.current = () => {
       el.removeEventListener("mousedown", onMouseDown);
       el.removeEventListener("mousemove", onMouseMove);
       el.removeEventListener("mouseup", onMouseUp);
       el.removeEventListener("mouseleave", onMouseLeave);
       el.removeEventListener("click", onClick, true);
+      el.style.cursor = "";
     };
-  }, [onMouseDown, onMouseMove, onMouseUp, onMouseLeave, onClick]);
-
-  return ref;
+  }, []);
 }
