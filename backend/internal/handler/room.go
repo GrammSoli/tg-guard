@@ -546,7 +546,19 @@ func roomSummary(r *model.SharedRoom) fiber.Map {
 	var services []fiber.Map
 	for _, s := range r.Services {
 		total += s.Amount
-		services = append(services, fiber.Map{"brand": s.Brand})
+		// Custom services land in the DB with brand="default" plus an
+		// icon_name/icon_color the user picked in the IconPicker. The
+		// dashboard summary needs both so the room card can render the
+		// chosen icon instead of falling back to the first-letter
+		// placeholder of "default" → "D".
+		entry := fiber.Map{"brand": s.Brand}
+		if s.IconName != "" {
+			entry["icon_name"] = s.IconName
+		}
+		if s.IconColor != "" {
+			entry["icon_color"] = s.IconColor
+		}
+		services = append(services, entry)
 	}
 	if services == nil {
 		services = make([]fiber.Map, 0)
