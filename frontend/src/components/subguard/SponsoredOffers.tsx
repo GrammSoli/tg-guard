@@ -103,6 +103,7 @@ export function SponsoredOffers() {
             href={o.url}
             target="_blank"
             rel="noopener noreferrer"
+            draggable={false}
             className="bg-surface min-w-[220px] shrink-0 rounded-2xl p-4 text-left no-underline"
             onClick={() => trackClick(o.id)}
           >
