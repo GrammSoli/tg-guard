@@ -51,7 +51,6 @@ interface Props {
 interface PickedService {
   _tempId: string;
   brand: string;
-  logoUrl: string;
   name: string;
   amount: number;
   currency: string;
@@ -115,11 +114,12 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
   const debouncedServiceSearch = useDebouncedValue(serviceSearch, 300);
   const isSearchPending = serviceSearch !== debouncedServiceSearch;
 
-  // Available services — show ALL, allow duplicates
-  const availableServices = useMemo(
-    () => POPULAR_SERVICES.filter((p) => p.logoUrl),
-    [],
-  );
+  // Available services — show ALL, allow duplicates.
+  // (The old `.filter(p => p.logoUrl)` guard was a leftover from the
+  // thesvg.org era when some catalog entries lacked an icon URL.
+  // Now every PopularService carries a Brandfetch domain by
+  // construction.)
+  const availableServices = useMemo(() => POPULAR_SERVICES, []);
 
   // Filtered by search query
   const filteredAvailable = useMemo(() => {
@@ -134,7 +134,6 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
       {
         _tempId: crypto.randomUUID(),
         brand: p.brand,
-        logoUrl: p.logoUrl!,
         name: p.name,
         amount: p.defaultAmount,
         currency: p.defaultCurrency,
@@ -167,7 +166,6 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
       {
         _tempId: crypto.randomUUID(),
         brand: "default",
-        logoUrl: "",
         name: customName.trim(),
         amount: parseFloat(customAmount),
         currency: customCurrency,
@@ -197,8 +195,11 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
         name: name.trim(),
         currency,
         services: services.map(s => ({
+          // logo_url was the old thesvg URL; backend doesn't store it
+          // (RoomService model has no such column) and the new
+          // Brandfetch flow resolves URLs from brand → catalog at
+          // render time. Dropping the field altogether.
           brand: s.brand,
-          logo_url: s.logoUrl,
           name: s.name,
           amount: Math.round(convertCurrency(s.amount, s.currency, currency) * 100) / 100,
           currency,

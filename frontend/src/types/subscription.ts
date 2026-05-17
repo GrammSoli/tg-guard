@@ -1,42 +1,19 @@
-export type BrandKey =
-  | "netflix"
-  | "spotify"
-  | "youtube"
-  | "icloud"
-  | "apple"
-  | "applemusic"
-  | "telegram"
-  | "disney"
-  | "notion"
-  | "chatgpt"
-  | "midjourney"
-  | "figma"
-  | "canva"
-  | "dropbox"
-  | "googleone"
-  | "xbox"
-  | "playstation"
-  | "twitch"
-  | "hbomax"
-  | "crunchyroll"
-  | "nordvpn"
-  | "expressvpn"
-  | "onepassword"
-  | "todoist"
-  | "linear"
-  | "slack"
-  | "zoom"
-  | "duolingo"
-  | "strava"
-  | "headspace"
-  | "github"
-  | "adobe"
-  | "yandexplus"
-  | "vkmusic"
-  | "mts"
-  | "megogo"
-  | "kinopoisk"
-  | "default";
+/**
+ * Brand identifier — the lookup key for POPULAR_SERVICES and the value
+ * stored in DB on each Subscription / RoomService. Plain string rather
+ * than a strict union because:
+ *
+ *   - the catalog now carries ~200 entries; keeping a TS union in
+ *     lockstep with that table is mostly busywork
+ *   - the backend treats `brand` as an opaque string; a stricter
+ *     frontend type would create a false sense of validation
+ *   - custom services land with "default" and can grow into arbitrary
+ *     user-typed brands in the future
+ *
+ * Behaviour on unknown brand: ServiceLogo falls back to a colour-tinted
+ * first-letter placeholder. Always rendered safely.
+ */
+export type BrandKey = string;
 
 export type BillingPeriod = "monthly" | "yearly" | "weekly";
 

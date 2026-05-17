@@ -116,10 +116,7 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
   }, [room?.last_reminded_at]);
 
   const available = useMemo(
-    () =>
-      room
-        ? POPULAR_SERVICES.filter((p) => p.logoUrl)
-        : [],
+    () => (room ? POPULAR_SERVICES : []),
     [room?.services],
   );
 
@@ -213,7 +210,6 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
     try {
       await addService(room.id, {
         brand: p.brand,
-        logo_url: p.logoUrl!,
         name: p.name,
         amount: p.defaultAmount,
         currency: p.defaultCurrency,
@@ -234,7 +230,6 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
     try {
       await addService(room.id, {
         brand: "default",
-        logo_url: "",
         name: customName.trim(),
         amount: parseFloat(customAmount),
         currency: customCurrency,
