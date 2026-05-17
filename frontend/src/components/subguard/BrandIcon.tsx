@@ -13,6 +13,11 @@ interface Props {
   /** Custom icon overrides for "default" brand subscriptions. */
   iconName?: string;
   iconColor?: string;
+  /** Explicit domain override for ServiceLogo's Brandfetch lookup. When
+   *  set, wins over the catalog mapping by `brand` — used when the
+   *  caller knows the user typed a hostname (e.g. "nike.com") as their
+   *  custom subscription name and we want the logo right then. */
+  domain?: string;
 }
 
 // xs/sm/md/lg: dashboard room-card stack uses xs (20-24px), the
@@ -45,9 +50,28 @@ export function BrandIcon({
   rounded = "2xl",
   iconName,
   iconColor,
+  domain,
 }: Props) {
   const px = SIZE_MAP[size];
   const roundClass = rounded === "full" ? "rounded-full" : "rounded-2xl";
+
+  // When the caller passes an explicit domain (typically because the
+  // user typed a hostname as the custom subscription name), the
+  // Brandfetch logo wins over the IconPicker selection. Lets the user
+  // type "nike.com" and immediately see the Nike logo without going
+  // through the catalog.
+  if (domain) {
+    return (
+      <ServiceLogo
+        brand={brand}
+        name={brand}
+        size={px}
+        rounded={rounded}
+        domain={domain}
+        className={`shadow-elevated ${className}`}
+      />
+    );
+  }
 
   if (brand === "default" && iconName && iconColor) {
     const Icon = ICON_MAP[iconName];
