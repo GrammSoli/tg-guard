@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Pencil } from "lucide-react";
 import { categoryKey } from "@/lib/categoryKey";
+import { looksLikeDomain } from "@/lib/brandfetch";
 import { DEFAULT_ICON_COLOR, DEFAULT_ICON_NAME } from "@/lib/customIcons";
 import { IconPicker } from "./IconPicker";
 import { Switch } from "@/components/ui/switch";
@@ -211,41 +212,57 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
           <>
           <div className="space-y-4 px-5 pb-2">
             <div className="bg-surface flex items-center gap-3 rounded-2xl p-3">
-              {brand === "default" ? (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={t("modal.editIcon")}
-                      className="group relative shrink-0 rounded-2xl transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                      <BrandIcon brand={brand} iconName={iconName} iconColor={iconColor} />
-                      {/* Pencil badge — small, sits just outside the avatar in the
-                          bottom-right. Border-2 in the surface colour creates a
-                          clean cut-out look against the avatar tint. */}
-                      <span className="bg-foreground text-background border-surface absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 shadow transition-transform group-hover:scale-110">
-                        <Pencil className="h-2.5 w-2.5" />
-                      </span>
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="start"
-                    side="bottom"
-                    className="w-72 p-3"
-                  >
-                    <IconPicker
-                      iconName={iconName}
-                      iconColor={iconColor}
-                      onChange={({ iconName: n, iconColor: c }) => {
-                        setIconName(n);
-                        setIconColor(c);
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                <BrandIcon brand={brand} iconName={iconName} iconColor={iconColor} />
-              )}
+              {(() => {
+                // Auto-resolve a Brandfetch logo when the user types a
+                // hostname as their custom subscription name (e.g.
+                // "nike.com" → Nike logo). Keeps the IconPicker
+                // overlay available for non-domain names like
+                // "Family Plan" or "Дача".
+                const typedDomain = brand === "default" && looksLikeDomain(name) ? name.trim().toLowerCase() : undefined;
+                if (brand === "default" && !typedDomain) {
+                  return (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={t("modal.editIcon")}
+                          className="group relative shrink-0 rounded-2xl transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        >
+                          <BrandIcon brand={brand} iconName={iconName} iconColor={iconColor} />
+                          {/* Pencil badge — small, sits just outside the avatar in the
+                              bottom-right. Border-2 in the surface colour creates a
+                              clean cut-out look against the avatar tint. */}
+                          <span className="bg-foreground text-background border-surface absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 shadow transition-transform group-hover:scale-110">
+                            <Pencil className="h-2.5 w-2.5" />
+                          </span>
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="start"
+                        side="bottom"
+                        className="w-72 p-3"
+                      >
+                        <IconPicker
+                          iconName={iconName}
+                          iconColor={iconColor}
+                          onChange={({ iconName: n, iconColor: c }) => {
+                            setIconName(n);
+                            setIconColor(c);
+                          }}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  );
+                }
+                return (
+                  <BrandIcon
+                    brand={brand}
+                    iconName={iconName}
+                    iconColor={iconColor}
+                    domain={typedDomain}
+                  />
+                );
+              })()}
               <button
                 type="button"
                 onClick={() => setStep("catalog")}

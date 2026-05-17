@@ -66,3 +66,22 @@ export function brandfetchIcon(
 export function brandfetchEnabled(): boolean {
   return CLIENT_ID.length > 0;
 }
+
+// Hostname-shaped: `label`, optional `.label`s, dot required, no scheme,
+// no path. Matches "nike.com", "music.apple.com", "vk.ru"; rejects bare
+// names ("netflix"), URLs ("https://..."), and random text.
+const DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+
+/**
+ * Is this string shaped like a hostname operators / users would type
+ * into an "icon" or "brand" field, where pulling it through Brandfetch
+ * would Just Work? Used by the Add Subscription / Sponsored Offer
+ * forms to auto-resolve a logo when the user types something like
+ * "nike.com" instead of picking from the catalog.
+ */
+export function looksLikeDomain(s: string | null | undefined): boolean {
+  if (!s) return false;
+  // Trim, lowercase, strip trailing slash so the regex stays simple.
+  const v = s.trim().toLowerCase().replace(/\/+$/, "");
+  return DOMAIN_RE.test(v);
+}
