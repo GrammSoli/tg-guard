@@ -442,7 +442,7 @@ func (p *adminPanel) handleText(ctx context.Context, b *tgbot.Bot, update *model
 		p.setState(ctx, tgID, stateAwaitOfferIcon)
 		b.SendMessage(ctx, &tgbot.SendMessageParams{
 			ChatID:    chatID,
-			Text:      "🎨 Введите *иконку* оффера:\n• Системное имя (напр. `netflix`)\n• URL на изображение (`https://...`)\n• `-` чтобы пропустить",
+			Text:      "🎨 Введите *иконку* оффера:\n• Домен бренда (напр. `nike.com`) — рекомендуется, тянется с Brandfetch CDN\n• Системное имя из каталога (напр. `netflix`)\n• URL на изображение (`https://...`)\n• `-` чтобы пропустить",
 			ParseMode: "Markdown",
 		})
 

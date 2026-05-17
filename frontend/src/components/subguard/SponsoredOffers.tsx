@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpRight } from "lucide-react";
 import { api } from "@/lib/api";
+import { brandfetchIcon } from "@/lib/brandfetch";
 import { BrandIcon } from "./BrandIcon";
 import type { SponsoredOffer } from "@/types/subscription";
 import type { BrandKey } from "@/types/subscription";
@@ -101,15 +102,42 @@ export function SponsoredOffers() {
             onClick={() => trackClick(o.id)}
           >
             <div className="flex items-start justify-between">
-              {o.icon_name?.startsWith("http") ? (
-                <img
-                  src={o.icon_name}
-                  alt={o.title}
-                  className="h-10 w-10 shrink-0 rounded-full object-cover"
-                />
-              ) : (
-                <BrandIcon brand={(o.icon_name || "default") as BrandKey} size="sm" />
-              )}
+              {(() => {
+                // icon_name shape decides the renderer (in priority order):
+                //  1. Full URL → <img> with the raw URL.
+                //  2. Looks like a domain (e.g. "nike.com", "music.apple.com")
+                //     → Brandfetch CDN.
+                //  3. Anything else → catalog lookup via BrandIcon, which
+                //     falls back to a colour-tinted letter placeholder.
+                const v = o.icon_name ?? "";
+                if (v.startsWith("http")) {
+                  return (
+                    <img
+                      src={v}
+                      alt={o.title}
+                      className="h-10 w-10 shrink-0 rounded-full object-cover"
+                    />
+                  );
+                }
+                if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(v)) {
+                  const url = brandfetchIcon(v, {
+                    size: 64,
+                    type: "icon",
+                    theme: "dark",
+                    fallback: "transparent",
+                  });
+                  if (url) {
+                    return (
+                      <img
+                        src={url}
+                        alt={o.title}
+                        className="h-10 w-10 shrink-0 rounded-full object-cover"
+                      />
+                    );
+                  }
+                }
+                return <BrandIcon brand={(v || "default") as BrandKey} size="sm" />;
+              })()}
               {o.badge_text && (
                 <span className="bg-primary/15 text-primary rounded-full px-2 py-0.5 text-[10px] font-semibold">
                   {o.badge_text}
