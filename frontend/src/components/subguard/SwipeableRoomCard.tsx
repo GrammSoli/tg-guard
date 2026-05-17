@@ -4,6 +4,7 @@ import { hapticImpact } from "@/lib/telegram";
 import { useTranslation } from "react-i18next";
 import { useSwipeGesture, SPRING_TRANSITION } from "@/hooks/useSwipeGesture";
 import { ServiceLogo } from "./ServiceLogo";
+import { BrandIcon } from "./BrandIcon";
 import { formatCurrency, localeFor } from "@/lib/format";
 import {
   AlertDialog,
@@ -116,16 +117,31 @@ export function SwipeableRoomCard({ room, displayAmount, userCurrency, onClick, 
               </div>
             </div>
             <div className="ml-3 flex -space-x-1.5">
-              {room.services.slice(0, 4).map((s, i) => (
-                <ServiceLogo
-                  key={i}
-                  brand={s.brand}
-                  name={s.brand}
-                  size={24}
-                  rounded="full"
-                  className="border border-background"
-                />
-              ))}
+              {room.services.slice(0, 4).map((s, i) =>
+                // Custom services (brand="default") fall back to a "D"
+                // letter placeholder in ServiceLogo. Render BrandIcon
+                // instead, which honours the IconPicker selection.
+                s.brand === "default" && s.icon_name && s.icon_color ? (
+                  <BrandIcon
+                    key={i}
+                    brand="default"
+                    size="xs"
+                    rounded="full"
+                    iconName={s.icon_name}
+                    iconColor={s.icon_color}
+                    className="border border-background"
+                  />
+                ) : (
+                  <ServiceLogo
+                    key={i}
+                    brand={s.brand}
+                    name={s.brand}
+                    size={24}
+                    rounded="full"
+                    className="border border-background"
+                  />
+                ),
+              )}
             </div>
           </button>
         </div>

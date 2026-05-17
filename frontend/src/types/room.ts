@@ -36,7 +36,15 @@ export interface RoomSummary {
   members: number;
   total_per_member: number;
   currency: string;
-  services: { brand: BrandKey }[];
+  // icon_name/icon_color carry the user's IconPicker choice for
+  // custom services (brand="default"). The dashboard room card uses
+  // them to render the chosen icon instead of falling back to the
+  // first-letter placeholder of "default" → "D".
+  services: {
+    brand: BrandKey;
+    icon_name?: string;
+    icon_color?: string;
+  }[];
 }
 
 export function roomToSummary(room: Room): RoomSummary {
@@ -48,6 +56,10 @@ export function roomToSummary(room: Room): RoomSummary {
     members: room.members.length,
     total_per_member: Math.round(perMember * 100) / 100,
     currency: room.currency,
-    services: room.services.map((s) => ({ brand: s.brand })),
+    services: room.services.map((s) => ({
+      brand: s.brand,
+      icon_name: s.icon_name,
+      icon_color: s.icon_color,
+    })),
   };
 }

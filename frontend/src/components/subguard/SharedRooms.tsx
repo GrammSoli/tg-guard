@@ -6,6 +6,7 @@ import { convertCurrency, useFxRates } from "@/lib/currencyRates";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useDragScroll } from "@/hooks/useDragScroll";
 import { ServiceLogo } from "./ServiceLogo";
+import { BrandIcon } from "./BrandIcon";
 
 interface Props {
   rooms: RoomSummary[];
@@ -72,16 +73,32 @@ export function SharedRooms({ rooms, onViewAll, onOpen, onCreateRoom }: Props) {
               <div className="flex items-center justify-between">
                 <p className="truncate text-sm font-bold">{room.name}</p>
                 <div className="flex -space-x-1.5">
-                  {room.services.slice(0, 3).map((s, i) => (
-                    <ServiceLogo
-                      key={i}
-                      brand={s.brand}
-                      name={s.brand}
-                      size={20}
-                      rounded="full"
-                      className="border border-background"
-                    />
-                  ))}
+                  {room.services.slice(0, 3).map((s, i) =>
+                    // Custom services land with brand="default" and
+                    // an IconPicker selection. Without this branch
+                    // ServiceLogo falls back to the first letter of
+                    // "default" → an unhelpful "D" badge.
+                    s.brand === "default" && s.icon_name && s.icon_color ? (
+                      <BrandIcon
+                        key={i}
+                        brand="default"
+                        size="xs"
+                        rounded="full"
+                        iconName={s.icon_name}
+                        iconColor={s.icon_color}
+                        className="border border-background"
+                      />
+                    ) : (
+                      <ServiceLogo
+                        key={i}
+                        brand={s.brand}
+                        name={s.brand}
+                        size={20}
+                        rounded="full"
+                        className="border border-background"
+                      />
+                    ),
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">

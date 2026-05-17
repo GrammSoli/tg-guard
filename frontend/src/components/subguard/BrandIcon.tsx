@@ -4,20 +4,28 @@ import { COLOR_MAP, ICON_MAP } from "@/lib/customIcons";
 
 interface Props {
   brand: BrandKey;
-  size?: "sm" | "md" | "lg";
+  size?: "xs" | "sm" | "md" | "lg";
   className?: string;
+  /** Corner radius. Default 2xl matches AddSubscriptionSheet-style
+   *  rounded-square avatars; "full" makes a circle for stacks where
+   *  the surrounding ServiceLogos are circular (dashboard room card). */
+  rounded?: "2xl" | "full";
   /** Custom icon overrides for "default" brand subscriptions. */
   iconName?: string;
   iconColor?: string;
 }
 
+// xs/sm/md/lg: dashboard room-card stack uses xs (20-24px), the
+// per-subscription rows use sm, AddSubscriptionSheet header uses md/lg.
 const SIZE_MAP = {
+  xs: 24,
   sm: 36,
   md: 48,
   lg: 56,
 } as const;
 
 const ICON_PX = {
+  xs: 14,
   sm: 18,
   md: 24,
   lg: 28,
@@ -34,10 +42,12 @@ export function BrandIcon({
   brand,
   size = "md",
   className = "",
+  rounded = "2xl",
   iconName,
   iconColor,
 }: Props) {
   const px = SIZE_MAP[size];
+  const roundClass = rounded === "full" ? "rounded-full" : "rounded-2xl";
 
   if (brand === "default" && iconName && iconColor) {
     const Icon = ICON_MAP[iconName];
@@ -45,7 +55,7 @@ export function BrandIcon({
     if (Icon && colour) {
       return (
         <div
-          className={`shadow-elevated flex shrink-0 items-center justify-center rounded-2xl text-white ${colour.bg} ${className}`}
+          className={`shadow-elevated flex shrink-0 items-center justify-center ${roundClass} text-white ${colour.bg} ${className}`}
           style={{ width: px, height: px }}
           aria-hidden="true"
         >
@@ -60,7 +70,7 @@ export function BrandIcon({
       brand={brand}
       name={brand}
       size={px}
-      rounded="2xl"
+      rounded={rounded}
       className={`shadow-elevated ${className}`}
     />
   );
