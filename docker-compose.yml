@@ -27,6 +27,8 @@ services:
         VITE_SUPPORT_URL: ${VITE_SUPPORT_URL:-}
         VITE_PRIVACY_POLICY_URL: ${VITE_PRIVACY_POLICY_URL:-}
         VITE_TERMS_OF_SERVICE_URL: ${VITE_TERMS_OF_SERVICE_URL:-}
+        VITE_TGA_TOKEN: ${VITE_TGA_TOKEN:-}
+        VITE_TGA_APP_NAME: ${VITE_TGA_APP_NAME:-}
     volumes:
       - frontend_dist:/output
     entrypoint: ["sh", "-c", "cp -r /app/dist/* /output/ && echo 'Frontend copied.'"]
