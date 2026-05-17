@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Pencil } from "lucide-react";
 import { categoryKey } from "@/lib/categoryKey";
-import { looksLikeDomain } from "@/lib/brandfetch";
+import { domainHintFromName } from "@/lib/brandfetch";
 import { DEFAULT_ICON_COLOR, DEFAULT_ICON_NAME } from "@/lib/customIcons";
 import { IconPicker } from "./IconPicker";
 import { Switch } from "@/components/ui/switch";
@@ -218,7 +218,7 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
                 // "nike.com" → Nike logo). Keeps the IconPicker
                 // overlay available for non-domain names like
                 // "Family Plan" or "Дача".
-                const typedDomain = brand === "default" && looksLikeDomain(name) ? name.trim().toLowerCase() : undefined;
+                const typedDomain = domainHintFromName(brand, name);
                 if (brand === "default" && !typedDomain) {
                   return (
                     <Popover>

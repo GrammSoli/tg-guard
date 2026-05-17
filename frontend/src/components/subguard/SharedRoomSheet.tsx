@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useTelegramViewportHeight } from "@/hooks/use-telegram-viewport";
+import { domainHintFromName } from "@/lib/brandfetch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
@@ -688,7 +689,13 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
                   className="bg-surface flex items-center gap-3 rounded-2xl p-3"
                 >
                   {s.brand === "default" && s.icon_name && s.icon_color ? (
-                    <BrandIcon brand="default" size="md" iconName={s.icon_name} iconColor={s.icon_color} />
+                    <BrandIcon
+                      brand="default"
+                      size="md"
+                      iconName={s.icon_name}
+                      iconColor={s.icon_color}
+                      domain={domainHintFromName(s.brand, s.name)}
+                    />
                   ) : (
                     <ServiceLogo brand={s.brand as any} name={s.name} size={40} rounded="xl" />
                   )}

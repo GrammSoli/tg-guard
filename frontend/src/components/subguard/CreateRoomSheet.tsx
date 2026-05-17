@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useTelegramViewportHeight } from "@/hooks/use-telegram-viewport";
+import { domainHintFromName } from "@/lib/brandfetch";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Drawer,
@@ -298,7 +299,13 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                       className="bg-surface flex items-center gap-3 rounded-2xl p-3"
                     >
                       {s.brand === "default" && s.icon_name && s.icon_color ? (
-                        <BrandIcon brand="default" size="sm" iconName={s.icon_name} iconColor={s.icon_color} />
+                        <BrandIcon
+                          brand="default"
+                          size="sm"
+                          iconName={s.icon_name}
+                          iconColor={s.icon_color}
+                          domain={domainHintFromName(s.brand, s.name)}
+                        />
                       ) : (
                         <ServiceLogo brand={s.brand as any} name={s.name} size={36} rounded="xl" />
                       )}

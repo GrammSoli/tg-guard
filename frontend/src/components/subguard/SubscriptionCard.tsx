@@ -7,6 +7,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { Clock3 } from "lucide-react";
 import { BrandIcon } from "./BrandIcon";
 import { DateTz } from "./DateTz";
+import { domainHintFromName } from "@/lib/brandfetch";
 
 interface Props {
   subscription: Subscription;
@@ -74,7 +75,12 @@ export const SubscriptionCard = memo(function SubscriptionCard({
       onClick={() => onClick?.(s)}
       className="bg-surface group flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-transform active:scale-[0.98]"
     >
-      <BrandIcon brand={s.brand} iconName={s.icon_name} iconColor={s.icon_color} />
+      <BrandIcon
+        brand={s.brand}
+        iconName={s.icon_name}
+        iconColor={s.icon_color}
+        domain={domainHintFromName(s.brand, s.name)}
+      />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className="min-w-0 truncate text-[15px] font-semibold">

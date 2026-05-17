@@ -85,3 +85,21 @@ export function looksLikeDomain(s: string | null | undefined): boolean {
   const v = s.trim().toLowerCase().replace(/\/+$/, "");
   return DOMAIN_RE.test(v);
 }
+
+/**
+ * For custom-brand subscriptions / services (brand="default"), if the
+ * user-typed `name` is a hostname, return it normalised — to be passed
+ * as the `domain` prop on BrandIcon / ServiceLogo so the avatar
+ * renders the real Brandfetch logo instead of the IconPicker
+ * placeholder. Returns undefined when the name isn't a domain OR the
+ * brand is anything other than "default" (those go through the
+ * catalog's brand-domain map already).
+ */
+export function domainHintFromName(
+  brand: string | undefined | null,
+  name: string | undefined | null,
+): string | undefined {
+  if (brand !== "default") return undefined;
+  if (!looksLikeDomain(name)) return undefined;
+  return (name as string).trim().toLowerCase().replace(/\/+$/, "");
+}
