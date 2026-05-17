@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import * as Sentry from "@sentry/react";
+import telegramAnalytics from "@telegram-apps/analytics";
 import { getRouter } from "./router";
 import { expandMiniApp, tgReady } from "@/lib/telegram";
 import "./styles.css";
@@ -44,6 +45,16 @@ if (SENTRY_DSN) {
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 1.0,
   });
+}
+
+// ── Telegram Analytics ───────────────────────────────────
+// No-op when the env vars are unset. Tracks app launches and
+// TON Connect events automatically. The token and app identifier
+// are issued by @DataChief_bot. Init must run before render.
+const TGA_TOKEN = import.meta.env.VITE_TGA_TOKEN as string | undefined;
+const TGA_APP_NAME = import.meta.env.VITE_TGA_APP_NAME as string | undefined;
+if (TGA_TOKEN && TGA_APP_NAME) {
+  telegramAnalytics.init({ token: TGA_TOKEN, appName: TGA_APP_NAME });
 }
 
 const router = getRouter();
