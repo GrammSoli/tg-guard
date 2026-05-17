@@ -4,7 +4,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import * as Sentry from "@sentry/react";
 import telegramAnalytics from "@telegram-apps/analytics";
 import { getRouter } from "./router";
-import { expandMiniApp, tgReady } from "@/lib/telegram";
+import { expandMiniApp, isLaunchedFromTelegram, tgReady } from "@/lib/telegram";
 import "./styles.css";
 import "@/lib/i18n";
 
@@ -51,9 +51,14 @@ if (SENTRY_DSN) {
 // No-op when the env vars are unset. Tracks app launches and
 // TON Connect events automatically. The token and app identifier
 // are issued by @DataChief_bot. Init must run before render.
+//
+// Gated on isLaunchedFromTelegram(): outside Telegram the SDK can't
+// retrieve launch params and throws LaunchParamsRetrieveError as an
+// unhandled rejection — noise for anyone (or any crawler) hitting
+// the domain in a plain browser.
 const TGA_TOKEN = import.meta.env.VITE_TGA_TOKEN as string | undefined;
 const TGA_APP_NAME = import.meta.env.VITE_TGA_APP_NAME as string | undefined;
-if (TGA_TOKEN && TGA_APP_NAME) {
+if (TGA_TOKEN && TGA_APP_NAME && isLaunchedFromTelegram()) {
   telegramAnalytics.init({ token: TGA_TOKEN, appName: TGA_APP_NAME });
 }
 

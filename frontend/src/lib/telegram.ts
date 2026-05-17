@@ -11,6 +11,21 @@ export function isTelegramWebApp(): boolean {
   return !!((window as unknown as Record<string, unknown>).Telegram);
 }
 
+/**
+ * Whether the app was actually launched from within Telegram — as
+ * opposed to merely having telegram-web-app.js loaded in a plain
+ * browser, which also defines window.Telegram. True only when
+ * Telegram passed a non-empty initData launch payload.
+ */
+export function isLaunchedFromTelegram(): boolean {
+  try {
+    const initData = tg()?.initData;
+    return typeof initData === "string" && initData.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Access the raw Telegram.WebApp object if available */
 function tg() {
   if (typeof window === "undefined") return null;
