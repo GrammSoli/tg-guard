@@ -18,8 +18,12 @@ const CLIENT_ID = (import.meta.env.VITE_BRANDFETCH_CLIENT_ID as string | undefin
 export interface BrandfetchIconOpts {
   /** Pixel size — usually we render a square, so width = height. */
   size?: number;
-  /** Light vs dark logo variant; defaults to "light" because our app
-   *  surfaces are dark and a light-on-dark logo reads better there. */
+  /** Logo variant optimised for the target background.
+   *  - "dark"  → light/white logo, intended for use ON a dark
+   *    background. Counter-intuitive naming but it's Brandfetch's
+   *    convention (matches CSS color-scheme).
+   *  - "light" → dark logo, intended for use ON a light background.
+   *  When omitted, Brandfetch serves the default colour variant. */
   theme?: "light" | "dark";
   /** logo (full wordmark) | icon (compact square) | symbol (icon only).
    *  ServiceLogo uses "icon" — it's the square avatar style we want
