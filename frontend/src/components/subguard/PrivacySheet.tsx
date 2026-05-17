@@ -33,9 +33,14 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
-// Placeholder URLs — replace with real telegra.ph posts once they're up.
-const PRIVACY_POLICY_URL = "https://telegra.ph/SubGuard-Privacy-Policy";
-const TERMS_OF_SERVICE_URL = "https://telegra.ph/SubGuard-Terms-of-Service";
+// Document links come from build-time env vars. When a var is unset the
+// corresponding button is hidden (see the Documents section below).
+const PRIVACY_POLICY_URL = (
+  import.meta.env.VITE_PRIVACY_POLICY_URL as string | undefined
+)?.trim();
+const TERMS_OF_SERVICE_URL = (
+  import.meta.env.VITE_TERMS_OF_SERVICE_URL as string | undefined
+)?.trim();
 
 /**
  * PrivacySheet — three sections:
@@ -75,11 +80,13 @@ export function PrivacySheet({ open, onOpenChange }: Props) {
   };
 
   const handleOpenPolicy = () => {
+    if (!PRIVACY_POLICY_URL) return;
     hapticImpact("light");
     openExternalLink(PRIVACY_POLICY_URL);
   };
 
   const handleOpenTerms = () => {
+    if (!TERMS_OF_SERVICE_URL) return;
     hapticImpact("light");
     openExternalLink(TERMS_OF_SERVICE_URL);
   };
@@ -158,37 +165,43 @@ export function PrivacySheet({ open, onOpenChange }: Props) {
             </section>
 
             {/* ── Documents ─────────────────────────────────── */}
-            <section>
-              <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {t("privacy.sectionDocuments")}
-              </p>
-              <div className="space-y-2">
-                <button
-                  onClick={handleOpenPolicy}
-                  className="bg-surface flex w-full items-center gap-3 rounded-2xl p-4 text-left transition-colors active:scale-[0.99]"
-                >
-                  <div className="bg-surface-elevated flex h-10 w-10 items-center justify-center rounded-xl">
-                    <FileText className="h-4 w-4" />
-                  </div>
-                  <p className="flex-1 text-sm font-semibold">
-                    {t("privacy.policy")}
-                  </p>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </button>
-                <button
-                  onClick={handleOpenTerms}
-                  className="bg-surface flex w-full items-center gap-3 rounded-2xl p-4 text-left transition-colors active:scale-[0.99]"
-                >
-                  <div className="bg-surface-elevated flex h-10 w-10 items-center justify-center rounded-xl">
-                    <FileText className="h-4 w-4" />
-                  </div>
-                  <p className="flex-1 text-sm font-semibold">
-                    {t("privacy.terms")}
-                  </p>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </button>
-              </div>
-            </section>
+            {(PRIVACY_POLICY_URL || TERMS_OF_SERVICE_URL) && (
+              <section>
+                <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("privacy.sectionDocuments")}
+                </p>
+                <div className="space-y-2">
+                  {PRIVACY_POLICY_URL && (
+                    <button
+                      onClick={handleOpenPolicy}
+                      className="bg-surface flex w-full items-center gap-3 rounded-2xl p-4 text-left transition-colors active:scale-[0.99]"
+                    >
+                      <div className="bg-surface-elevated flex h-10 w-10 items-center justify-center rounded-xl">
+                        <FileText className="h-4 w-4" />
+                      </div>
+                      <p className="flex-1 text-sm font-semibold">
+                        {t("privacy.policy")}
+                      </p>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  )}
+                  {TERMS_OF_SERVICE_URL && (
+                    <button
+                      onClick={handleOpenTerms}
+                      className="bg-surface flex w-full items-center gap-3 rounded-2xl p-4 text-left transition-colors active:scale-[0.99]"
+                    >
+                      <div className="bg-surface-elevated flex h-10 w-10 items-center justify-center rounded-xl">
+                        <FileText className="h-4 w-4" />
+                      </div>
+                      <p className="flex-1 text-sm font-semibold">
+                        {t("privacy.terms")}
+                      </p>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  )}
+                </div>
+              </section>
+            )}
 
             {/* ── Danger zone ───────────────────────────────── */}
             <section>
