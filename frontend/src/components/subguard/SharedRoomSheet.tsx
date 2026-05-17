@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useTelegramViewportHeight } from "@/hooks/use-telegram-viewport";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
@@ -69,6 +70,7 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const lc = localeFor(locale);
+  const tgVh = useTelegramViewportHeight();
   const [picking, setPicking] = useState(false);
   const [pendingRemoveService, setPendingRemoveService] = useState<{ id: number; brand: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -344,7 +346,8 @@ export function SharedRoomSheet({ roomId, open, onOpenChange }: Props) {
     >
       <SheetContent
         side="bottom"
-        className="bg-background max-h-[90vh] overflow-y-auto rounded-t-3xl border-t border-white/10 p-0"
+        className="bg-background overflow-y-auto rounded-t-3xl border-t border-white/10 p-0"
+        style={{ maxHeight: `${Math.round(tgVh * 0.9)}px` }}
       >
         {room && (
           <div className="px-5 pb-8 pt-2">

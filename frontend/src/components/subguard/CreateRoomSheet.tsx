@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useTelegramViewportHeight } from "@/hooks/use-telegram-viewport";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Drawer,
@@ -62,6 +63,12 @@ interface PickedService {
 export function CreateRoomSheet({ open, onOpenChange }: Props) {
   const { t, i18n } = useTranslation();
   const lc = localeFor(i18n.language);
+
+  // Telegram viewport, in px — shrinks when the on-screen keyboard
+  // appears on iOS. Without this, a `max-h-[55vh]` scroll region
+  // keeps its pre-keyboard height and the user sees a black void
+  // between the form input and the keyboard.
+  const tgVh = useTelegramViewportHeight();
   const create = useRoomStore((s) => s.create);
   const defaultCurrency = useSettingsStore((s) => s.settings.defaultCurrency);
   const [name, setName] = useState("");
@@ -237,7 +244,10 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
             </DrawerDescription>
           </DrawerHeader>
 
-          <div className="max-h-[55vh] space-y-4 overflow-y-auto px-5 pb-2">
+          <div
+            className="space-y-4 overflow-y-auto px-5 pb-2"
+            style={{ maxHeight: `${Math.round(tgVh * 0.55)}px` }}
+          >
             <div className="bg-surface space-y-2 rounded-2xl p-3">
               <Label className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {t("createRoom.roomName")}
