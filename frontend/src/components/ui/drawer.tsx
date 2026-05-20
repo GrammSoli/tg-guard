@@ -2,7 +2,6 @@ import * as React from "react";
 import { Drawer as DrawerPrimitive } from "vaul";
 
 import { cn } from "@/lib/utils";
-import { useTelegramViewportHeight } from "@/hooks/use-telegram-viewport";
 
 const Drawer = ({
   shouldScaleBackground = true,
@@ -47,23 +46,15 @@ const DrawerContent = React.forwardRef<
   React.ElementRef<typeof DrawerPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Content>
 >(({ className, children, style, ...props }, ref) => {
-  // On-screen keyboard handling:
-  //   - `interactive-widget=resizes-content` in index.html makes modern
-  //     browsers shrink the layout viewport with the keyboard, so a
-  //     `position: fixed; bottom: 0` anchors above the keyboard out of
-  //     the box. That fix alone covers iOS 16.4+ / Chrome WebView 108+.
-  //   - For older platforms `window.innerHeight` stays at the original
-  //     layout-viewport height while Telegram still reports the visible
-  //     height via viewportStableHeight (tgVh). The difference IS the
-  //     keyboard. We shift the drawer up by that amount and clamp its
-  //     max-height so it sits entirely above the keyboard.
-  const tgVh = useTelegramViewportHeight();
-  const layoutVh = typeof window !== "undefined" ? window.innerHeight : 0;
-  const keyboardOffset =
-    tgVh > 0 && layoutVh > 0 ? Math.max(0, layoutVh - tgVh) : 0;
-  const mergedStyle = {
-    ...(tgVh > 0 ? { maxHeight: `${Math.round(tgVh * 0.85)}px` } : null),
-    ...(keyboardOffset > 0 ? { bottom: `${keyboardOffset}px` } : null),
+  // Anchor the drawer above the on-screen keyboard using CSS custom
+  // properties driven by the VisualViewport API (see lib/viewport.ts).
+  // --kb-inset is the keyboard height in px (0 when no keyboard);
+  // --app-vh is the visible viewport height. Both update reactively
+  // via CSS, with no React state. Fallbacks (0px, 100dvh) keep things
+  // working on the brief frame before initViewportTracking runs.
+  const mergedStyle: React.CSSProperties = {
+    bottom: "var(--kb-inset, 0px)",
+    maxHeight: "calc(var(--app-vh, 100dvh) * 0.85)",
     ...style,
   };
   return (
@@ -72,7 +63,7 @@ const DrawerContent = React.forwardRef<
       <DrawerPrimitive.Content
         ref={ref}
         className={cn(
-          "fixed inset-x-0 bottom-0 z-50 mt-24 flex max-h-[85dvh] flex-col rounded-t-[10px] border bg-background",
+          "fixed inset-x-0 z-50 mt-24 flex flex-col rounded-t-[10px] border bg-background",
           className,
         )}
         style={mergedStyle}
