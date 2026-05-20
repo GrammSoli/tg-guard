@@ -148,6 +148,8 @@
   "createRoom.addServices": "Add Services",
   "createRoom.create": "Create Room",
   "createRoom.creating": "Creating…",
+  "createRoom.next": "Next",
+  "createRoom.servicesTitle": "Choose Services",
   "onboarding.trackTitle": "Track Subs",
   "onboarding.trackBody": "Automatic conversion and renewal alerts so nothing slips by.",
   "onboarding.shareTitle": "Share Costs",

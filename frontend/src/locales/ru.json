@@ -149,6 +149,8 @@
   "createRoom.addServices": "Добавить сервисы",
   "createRoom.create": "Создать комнату",
   "createRoom.creating": "Создаём…",
+  "createRoom.next": "Далее",
+  "createRoom.servicesTitle": "Выбор сервисов",
   "onboarding.trackTitle": "Контроль подписок",
   "onboarding.trackBody": "Автоматическая конвертация и напоминания о продлении — ничего не пропустите.",
   "onboarding.shareTitle": "Делите расходы",
