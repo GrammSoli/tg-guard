@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useTelegramViewportHeight } from "@/hooks/use-telegram-viewport";
 import { domainHintFromName } from "@/lib/brandfetch";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -64,11 +63,6 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
   const { t, i18n } = useTranslation();
   const lc = localeFor(i18n.language);
 
-  // Telegram viewport, in px — shrinks when the on-screen keyboard
-  // appears on iOS. Without this, a `max-h-[55vh]` scroll region
-  // keeps its pre-keyboard height and the user sees a black void
-  // between the form input and the keyboard.
-  const tgVh = useTelegramViewportHeight();
   const create = useRoomStore((s) => s.create);
   const defaultCurrency = useSettingsStore((s) => s.settings.defaultCurrency);
   const [name, setName] = useState("");
@@ -246,10 +240,12 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
             </DrawerDescription>
           </DrawerHeader>
 
-          <div
-            className="space-y-4 overflow-y-auto px-5 pb-2"
-            style={{ maxHeight: `${Math.round(tgVh * 0.55)}px` }}
-          >
+          {/* No outer overflow-y-auto here. The DrawerContent itself
+              provides the scroll region (flex-1 overflow-y-auto in
+              drawer.tsx); a second nested scroll was confusing iOS
+              into treating the first tap on an input as the start of
+              a scroll gesture, suppressing the click→focus chain. */}
+          <div className="space-y-4 px-5 pb-2">
             <div className="bg-surface space-y-2 rounded-2xl p-3">
               <Label className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {t("createRoom.roomName")}
@@ -351,7 +347,10 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                   onChange={(e) => setServiceSearch(e.target.value)}
                   className="bg-surface-elevated mb-2 w-full rounded-xl border-0 px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
                 />
-                <div className="max-h-48 min-h-[120px] overflow-y-auto">
+                <div
+                  className="min-h-[180px] overflow-y-auto"
+                  style={{ maxHeight: "calc(var(--app-vh, 100dvh) * 0.5)" }}
+                >
                   {isSearchPending ? (
                     Array.from({ length: 4 }).map((_, i) => (
                       <div key={i} className="flex items-center gap-3 rounded-xl p-2">
