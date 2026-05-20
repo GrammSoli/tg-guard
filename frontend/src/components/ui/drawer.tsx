@@ -34,16 +34,25 @@ const DrawerContent = React.forwardRef<
   React.ElementRef<typeof DrawerPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Content>
 >(({ className, children, style, ...props }, ref) => {
-  // Telegram on iOS shrinks the WebView viewport when the on-screen
-  // keyboard appears, but CSS `dvh` doesn't reliably follow that shrink
-  // inside Telegram's WebView (see lib/telegram.ts). Drive max-height
-  // from the Telegram-reported viewport so the drawer doesn't extend
-  // behind the keyboard, leaving a black void above it.
+  // On-screen keyboard handling:
+  //   - `interactive-widget=resizes-content` in index.html makes modern
+  //     browsers shrink the layout viewport with the keyboard, so a
+  //     `position: fixed; bottom: 0` anchors above the keyboard out of
+  //     the box. That fix alone covers iOS 16.4+ / Chrome WebView 108+.
+  //   - For older platforms `window.innerHeight` stays at the original
+  //     layout-viewport height while Telegram still reports the visible
+  //     height via viewportStableHeight (tgVh). The difference IS the
+  //     keyboard. We shift the drawer up by that amount and clamp its
+  //     max-height so it sits entirely above the keyboard.
   const tgVh = useTelegramViewportHeight();
-  const mergedStyle =
-    tgVh > 0
-      ? { maxHeight: `${Math.round(tgVh * 0.85)}px`, ...style }
-      : style;
+  const layoutVh = typeof window !== "undefined" ? window.innerHeight : 0;
+  const keyboardOffset =
+    tgVh > 0 && layoutVh > 0 ? Math.max(0, layoutVh - tgVh) : 0;
+  const mergedStyle = {
+    ...(tgVh > 0 ? { maxHeight: `${Math.round(tgVh * 0.85)}px` } : null),
+    ...(keyboardOffset > 0 ? { bottom: `${keyboardOffset}px` } : null),
+    ...style,
+  };
   return (
     <DrawerPortal>
       <DrawerOverlay />
