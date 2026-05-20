@@ -5,6 +5,7 @@ import * as Sentry from "@sentry/react";
 import telegramAnalytics from "@telegram-apps/analytics";
 import { getRouter } from "./router";
 import { expandMiniApp, isLaunchedFromTelegram, tgReady } from "@/lib/telegram";
+import { initViewportTracking } from "@/lib/viewport";
 import "./styles.css";
 import "@/lib/i18n";
 
@@ -14,6 +15,11 @@ import "@/lib/i18n";
 // that already has its post-expand dimensions when components subscribe.
 tgReady();
 expandMiniApp();
+
+// Wire the W3C VisualViewport API to CSS custom properties (--app-vh,
+// --kb-inset). Bottom sheets and any other keyboard-aware UI consume
+// these directly from CSS — no React state, no platform guessing.
+initViewportTracking();
 
 // ── Sentry ───────────────────────────────────────────────
 // No-op when VITE_SENTRY_DSN is unset (local dev needs no account).
