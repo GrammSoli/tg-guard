@@ -6,9 +6,22 @@ import { useTelegramViewportHeight } from "@/hooks/use-telegram-viewport";
 
 const Drawer = ({
   shouldScaleBackground = true,
+  repositionInputs = false,
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Root>) => (
-  <DrawerPrimitive.Root shouldScaleBackground={shouldScaleBackground} {...props} />
+  // repositionInputs={false}: vaul's built-in iOS keyboard handler
+  // translates the drawer upwards when an input is focused. With
+  // `interactive-widget=resizes-content` already set on the viewport
+  // meta, the browser shrinks the layout viewport and `position: fixed;
+  // bottom: 0` already anchors above the keyboard. Letting vaul shift
+  // the drawer on TOP of that double-shifts it and leaves a black void
+  // between the drawer and the keyboard. Disable vaul's handling and
+  // trust the platform.
+  <DrawerPrimitive.Root
+    shouldScaleBackground={shouldScaleBackground}
+    repositionInputs={repositionInputs}
+    {...props}
+  />
 );
 Drawer.displayName = "Drawer";
 
