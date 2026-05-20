@@ -6,6 +6,7 @@ import telegramAnalytics from "@telegram-apps/analytics";
 import { getRouter } from "./router";
 import { expandMiniApp, isLaunchedFromTelegram, tgReady } from "@/lib/telegram";
 import { initViewportTracking } from "@/lib/viewport";
+import { initInputFocusPrimer } from "@/lib/inputFocusPrimer";
 import "./styles.css";
 import "@/lib/i18n";
 
@@ -20,6 +21,10 @@ expandMiniApp();
 // --kb-inset). Bottom sheets and any other keyboard-aware UI consume
 // these directly from CSS — no React state, no platform guessing.
 initViewportTracking();
+
+// Force focus on inputs from pointerdown to bypass iOS Telegram's
+// broken first-tap click chain (see lib/inputFocusPrimer.ts).
+initInputFocusPrimer();
 
 // ── Sentry ───────────────────────────────────────────────
 // No-op when VITE_SENTRY_DSN is unset (local dev needs no account).
