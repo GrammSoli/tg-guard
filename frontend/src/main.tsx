@@ -6,6 +6,7 @@ import telegramAnalytics from "@telegram-apps/analytics";
 import { getRouter } from "./router";
 import { expandMiniApp, isLaunchedFromTelegram, tgReady } from "@/lib/telegram";
 import { initViewportTracking } from "@/lib/viewport";
+import { FocusDebugPanel } from "@/components/dev/FocusDebugPanel";
 import "./styles.css";
 import "@/lib/i18n";
 
@@ -139,6 +140,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <RootErrorBoundary>
       <RouterProvider router={router} />
+      <FocusDebugPanel />
     </RootErrorBoundary>
   </React.StrictMode>,
 );
