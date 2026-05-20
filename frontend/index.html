@@ -2,7 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <!-- interactive-widget=resizes-content makes the layout viewport
+         (not just the visual one) shrink when the on-screen keyboard
+         appears. Without it, `position: fixed; bottom: 0` (vaul Drawer,
+         Radix Sheet, FAB) anchors at the original viewport bottom —
+         behind the keyboard — leaving a black void above the keyboard.
+         Supported in Chrome 108+ (Android WebView) and Safari 16.4+
+         (iOS WKWebView). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
     <title>SubGuard — Subscriptions Dashboard</title>
     <meta name="description" content="Track, manage, and save on every subscription with SubGuard." />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
