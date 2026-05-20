@@ -165,3 +165,24 @@
     display: none;
   }
 }
+
+/*
+ * iOS WebView (Telegram in particular) sometimes suppresses the
+ * synthetic click/focus on the first tap of an input inside a
+ * touch-handling container (e.g. a vaul Drawer), because it spends a
+ * frame disambiguating between "tap" and "start of a gesture". Logs
+ * captured via FocusDebugPanel confirmed `pointerdown` + `touchstart`
+ * arriving on the input with no `mousedown`, `focusin` or `click`
+ * following — until the keyboard has been invoked once.
+ *
+ * `touch-action: manipulation` tells the browser to skip that
+ * disambiguation and treat taps on these elements as taps immediately.
+ * Side effect: disables double-tap-to-zoom on the element, which is
+ * the correct behaviour for form controls anyway.
+ */
+input,
+textarea,
+select,
+button {
+  touch-action: manipulation;
+}
