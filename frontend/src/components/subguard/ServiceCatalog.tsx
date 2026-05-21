@@ -72,7 +72,10 @@ export function ServiceCatalog({ onSelect, onCustom }: Props) {
       </p>
 
       <div className="relative">
-        <div className="max-h-72 overflow-y-auto pr-1">
+        <div
+          className="overflow-y-auto pr-1"
+          style={{ maxHeight: "calc(var(--app-vh, 100dvh) * 0.45)" }}
+        >
           {filtered.length > 0 ? (
             <div className="grid grid-cols-3 gap-3 pb-2">
               {filtered.map((s) => (

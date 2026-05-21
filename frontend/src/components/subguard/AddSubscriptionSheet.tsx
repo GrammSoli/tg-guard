@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Pencil } from "lucide-react";
+import { ChevronLeft, Pencil } from "lucide-react";
 import { categoryKey } from "@/lib/categoryKey";
 import { domainHintFromName } from "@/lib/brandfetch";
 import { DEFAULT_ICON_COLOR, DEFAULT_ICON_NAME } from "@/lib/customIcons";
@@ -195,21 +195,43 @@ export function AddSubscriptionSheet({ open, onOpenChange, initial, onSave, onDe
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="bg-background border-border">
         <div className="mx-auto w-full max-w-md">
+          {step === "catalog" ? (
+            <>
+              <DrawerHeader className="px-5">
+                <DrawerTitle className="text-xl">{t("modal.addTitle")}</DrawerTitle>
+                <DrawerDescription className="sr-only">
+                  {t("modal.addTitle")}
+                </DrawerDescription>
+              </DrawerHeader>
+              <div className="px-5 pb-6">
+                <ServiceCatalog onSelect={pickService} onCustom={pickCustom} />
+              </div>
+            </>
+          ) : (
+          <>
           <DrawerHeader className="px-5">
-            <DrawerTitle className="text-xl">
-              {initial ? t("modal.editTitle") : t("modal.addTitle")}
-            </DrawerTitle>
+            <div className="flex items-center gap-2">
+              {/* Back chevron appears only when adding — in edit mode we
+                  jump straight to the form and there's no catalog step
+                  to navigate back to. */}
+              {!initial && (
+                <button
+                  type="button"
+                  onClick={() => setStep("catalog")}
+                  className="bg-surface hover:bg-surface-elevated flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors"
+                  aria-label="Back"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+              )}
+              <DrawerTitle className="text-xl">
+                {initial ? t("modal.editTitle") : t("modal.addTitle")}
+              </DrawerTitle>
+            </div>
             <DrawerDescription className="sr-only">
               {t("modal.addTitle")}
             </DrawerDescription>
           </DrawerHeader>
-
-          {step === "catalog" ? (
-            <div className="px-5 pb-6">
-              <ServiceCatalog onSelect={pickService} onCustom={pickCustom} />
-            </div>
-          ) : (
-          <>
           <div className="space-y-4 px-5 pb-2">
             <div className="bg-surface flex items-center gap-3 rounded-2xl p-3">
               {(() => {
