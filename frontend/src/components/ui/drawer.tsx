@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 const Drawer = ({
   shouldScaleBackground = true,
   repositionInputs = false,
+  handleOnly = true,
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Root>) => (
   // repositionInputs={false}: vaul's built-in iOS keyboard handler
@@ -16,9 +17,19 @@ const Drawer = ({
   // the drawer on TOP of that double-shifts it and leaves a black void
   // between the drawer and the keyboard. Disable vaul's handling and
   // trust the platform.
+  //
+  // handleOnly={true}: vaul attaches global pointer listeners to
+  // detect drag-to-dismiss anywhere inside the drawer; on iOS this
+  // competes with click delivery on the user's first tap and the
+  // synthetic click gets dropped, so buttons (e.g. picking a service
+  // from the catalog) need to be tapped 2-3 times before they
+  // register. Restricting drag to the explicit <Handle /> on top of
+  // the drawer lets every other tap reach its button cleanly. Users
+  // can still swipe down on the visible handle to close.
   <DrawerPrimitive.Root
     shouldScaleBackground={shouldScaleBackground}
     repositionInputs={repositionInputs}
+    handleOnly={handleOnly}
     {...props}
   />
 );
@@ -69,7 +80,10 @@ const DrawerContent = React.forwardRef<
         style={mergedStyle}
         {...props}
       >
-        <div className="mx-auto mt-4 h-2 w-[100px] shrink-0 rounded-full bg-muted" />
+        {/* vaul's <Handle /> registers this element as the drag region
+            when handleOnly=true above. Visual styling matches the
+            plain pill we had before. */}
+        <DrawerPrimitive.Handle className="mx-auto mt-4 h-2 w-[100px] shrink-0 rounded-full bg-muted" />
         <div className="flex-1 overflow-y-auto">
           {children}
         </div>
