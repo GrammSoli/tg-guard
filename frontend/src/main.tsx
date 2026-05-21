@@ -7,6 +7,7 @@ import { getRouter } from "./router";
 import { expandMiniApp, isLaunchedFromTelegram, tgReady } from "@/lib/telegram";
 import { initViewportTracking } from "@/lib/viewport";
 import { initInputFocusPrimer } from "@/lib/inputFocusPrimer";
+import { initButtonClickPrimer } from "@/lib/buttonClickPrimer";
 import "./styles.css";
 import "@/lib/i18n";
 
@@ -25,6 +26,11 @@ initViewportTracking();
 // Force focus on inputs from pointerdown to bypass iOS Telegram's
 // broken first-tap click chain (see lib/inputFocusPrimer.ts).
 initInputFocusPrimer();
+
+// Same idea for buttons — if iOS drops the synthetic click on the
+// first tap, dispatch it ourselves from pointerup (see
+// lib/buttonClickPrimer.ts).
+initButtonClickPrimer();
 
 // ── Sentry ───────────────────────────────────────────────
 // No-op when VITE_SENTRY_DSN is unset (local dev needs no account).
