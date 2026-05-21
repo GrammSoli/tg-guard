@@ -387,8 +387,11 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                     </div>
                   )}
 
-                  {/* Search + results — no inner scroll, drawer's own scroll handles overflow */}
-                  <div className="bg-surface space-y-1 rounded-2xl p-2">
+                  {/* Search input + custom-service shortcut stay pinned at the top
+                      of the card; the results list scrolls inside its own bounded
+                      box so the user never has to swipe past 200+ services to
+                      reach the «Создать комнату» button in the footer. */}
+                  <div className="bg-surface rounded-2xl p-2">
                     <input
                       type="text"
                       placeholder={t("room.searchService")}
@@ -397,7 +400,6 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                       className="bg-surface-elevated mb-1 w-full rounded-xl border-0 px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
                     />
 
-                    {/* Custom service — own step now */}
                     <button
                       type="button"
                       onClick={() => setStep("custom")}
@@ -412,41 +414,45 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                       </div>
                     </button>
 
-                    {isSearchPending ? (
-                      Array.from({ length: 4 }).map((_, i) => (
-                        <div key={i} className="flex items-center gap-3 rounded-xl p-2">
-                          <Skeleton className="h-8 w-8 rounded-lg" />
-                          <Skeleton className="h-4 flex-1 rounded" />
-                          <Skeleton className="h-3 w-12 rounded" />
+                    <div
+                      className="overflow-y-auto"
+                      style={{ maxHeight: "calc(var(--app-vh, 100dvh) * 0.45)" }}
+                    >
+                      {isSearchPending ? (
+                        Array.from({ length: 4 }).map((_, i) => (
+                          <div key={i} className="flex items-center gap-3 rounded-xl p-2">
+                            <Skeleton className="h-8 w-8 rounded-lg" />
+                            <Skeleton className="h-4 flex-1 rounded" />
+                            <Skeleton className="h-3 w-12 rounded" />
+                          </div>
+                        ))
+                      ) : filteredAvailable.length === 0 ? (
+                        <div className="animate-smooth-fade flex flex-col items-center gap-2 px-3 py-6">
+                          <p className="text-xs text-muted-foreground">
+                            {availableServices.length === 0 ? t("room.allServicesAdded") : t("room.notFound")}
+                          </p>
+                          {availableServices.length > 0 && (
+                            <>
+                              <p className="text-[11px] text-muted-foreground/60">{t("room.tryAnotherQuery")}</p>
+                              <button
+                                onClick={() => setServiceSearch("")}
+                                className="mt-1 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+                              >
+                                {t("room.clearSearch")}
+                              </button>
+                            </>
+                          )}
                         </div>
-                      ))
-                    ) : filteredAvailable.length === 0 ? (
-                      <div className="animate-smooth-fade flex flex-col items-center gap-2 px-3 py-6">
-                        <p className="text-xs text-muted-foreground">
-                          {availableServices.length === 0 ? t("room.allServicesAdded") : t("room.notFound")}
-                        </p>
-                        {availableServices.length > 0 && (
-                          <>
-                            <p className="text-[11px] text-muted-foreground/60">{t("room.tryAnotherQuery")}</p>
-                            <button
-                              onClick={() => setServiceSearch("")}
-                              className="mt-1 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
-                            >
-                              {t("room.clearSearch")}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    ) : (
-                      filteredAvailable.map((p, i) => (
-                        <button
-                          key={p.id}
-                          onClick={() => handleServiceClick(p)}
-                          className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
-                          style={{ animationDelay: `${i * 30}ms`, animationFillMode: "backwards" }}
-                        >
-                          <ServiceLogo brand={p.brand as any} name={p.name} size={32} rounded="xl" />
-                          <span className="flex-1 text-sm font-medium">{p.name}</span>
+                      ) : (
+                        filteredAvailable.map((p, i) => (
+                          <button
+                            key={p.id}
+                            onClick={() => handleServiceClick(p)}
+                            className="animate-smooth-fade hover:bg-surface-elevated flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors"
+                            style={{ animationDelay: `${i * 30}ms`, animationFillMode: "backwards" }}
+                          >
+                            <ServiceLogo brand={p.brand as any} name={p.name} size={32} rounded="xl" />
+                            <span className="flex-1 text-sm font-medium">{p.name}</span>
                           <span className="text-xs text-muted-foreground">
                             {formatCurrency(convertCurrency(p.defaultAmount, p.defaultCurrency, currency), currency, lc)}
                           </span>
@@ -454,6 +460,7 @@ export function CreateRoomSheet({ open, onOpenChange }: Props) {
                         </button>
                       ))
                     )}
+                    </div>
                   </div>
                 </div>
 
